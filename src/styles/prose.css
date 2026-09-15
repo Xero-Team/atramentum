@@ -105,8 +105,20 @@
   }
 }
 
-/* highlight.js 主题（暗底代码块用的最小子集，自绘） */
-.hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-section { color: #e0907a; }
+/* ── 划词标注（CSS Custom Highlight API：不动 DOM 上色） ──
+   与 ::selection 互不干扰：选区仍是朱红底白字，标注是淡朱底/朱红下划线 */
+::highlight(moxue-highlight) {
+  background-color: rgba(192, 63, 43, 0.16);
+  color: inherit;
+}
+::highlight(moxue-underline) {
+  background-color: transparent;
+  color: inherit;
+  text-decoration: underline 2px #c03f2b;
+  text-underline-offset: 3px;
+}
+
+/* highlight.js 主题（暗底代码块用的最小子集，自绘） */.hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-section { color: #e0907a; }
 .hljs-string, .hljs-title, .hljs-name, .hljs-attr { color: #b8c98a; }
 .hljs-comment, .hljs-quote { color: #8a8778; font-style: italic; }
 .hljs-number, .hljs-symbol, .hljs-bullet { color: #d4b06a; }
