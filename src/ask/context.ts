@@ -67,13 +67,14 @@ function blockTextAfter(root: HTMLElement, node: Node | null): string {
   return acc.slice(0, WINDOW).trim()
 }
 
-/** 从阅读视图容器里提取划词上下文；selection 为选区原文 */
-export function extractAskContext(root: HTMLElement, selection: string): AskContext {
+/** 从阅读视图容器里提取划词上下文；selection 为选区原文。
+ *  range 可显式给（从已有标注进入时按锚点还原选区），缺省用当前窗口选区。 */
+export function extractAskContext(root: HTMLElement, selection: string, range?: Range | null): AskContext {
   const sel = window.getSelection()
+  const actual = range ?? (sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : null)
   let anchor: Node | null = null
-  if (sel && sel.rangeCount > 0) {
-    const range = sel.getRangeAt(0)
-    anchor = range.startContainer
+  if (actual) {
+    anchor = actual.startContainer
     // 若容器外（比如面板内划词），退化为 root 起点
     if (!root.contains(anchor)) anchor = null
   }

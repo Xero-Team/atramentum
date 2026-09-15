@@ -1,4 +1,5 @@
-// AI 面板：问 AI（划词/自由提问，Agent 式：自主检索课件并展示工作流程）与改写本节两种模式
+// AI 面板：问 AI（划词/自由提问，Agent 式：自主检索课件并展示工作流程）与改写本节两种模式。
+// 划词问答与会话自动存库（threads），可随时从「历史」抽屉复现、续问、删除——复现只读本地，不重发请求。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { chatStream, describeAIError, isAbortError } from '../ai/providers'
@@ -7,9 +8,13 @@ import { runAskAgent } from './agent'
 import type { AgentStep, CourseFiles, FlowItem } from './agent'
 import type { AskContext } from './context'
 import { extractAskContext } from './context'
+import type { Annotation, AskThread } from './types'
+import { anchorFromSelection, resolveAnchor } from './offsets'
+import { answerHTML } from './render'
+import { AskHistory } from './AskHistory'
+import { getAnnotation, getThread, saveAnnotation, saveThread, updateAnnotation } from '../course/dbStore'
 import { storeFor } from '../course'
 import type { CourseMeta } from '../types/course'
-import { renderMarkdownSafe } from '../markdown/renderer'
 import { stripFenceWrap } from '../generate/pipeline'
 import { useSettingsStore } from '../store/settingsStore'
 
@@ -25,9 +30,17 @@ interface Turn {
 }
 
 export interface AskSeed {
+  /** 划选原文；历史复现时为空 */
   selection: string
-  /** 每次划问自增，驱动新一轮会话 */
+  /** 每次划问递增（用时间戳），驱动新一轮会话 */
   nonce: number
+  /** 从已有标注点进来：复用该标注已存的会话 */
+  annotationId?: string
+  /** 选区上下文；历史复现时直接带回，不再从 DOM 推断 */
+  before?: string
+  after?: string
+  /** 历史复现：装载这段会话，不发任何请求 */
+  thread?: AskThread
 }
 
 type Mode = 'ask' | 'edit'
@@ -81,16 +94,6 @@ function buildEditPayload(instruction: string, courseTitle: string, sectionTitle
     '',
     '请输出改写后的完整正文。',
   ].join('\n')
-}
-
-/** 回答渲染：净化后剥掉相对链接（回答里的站内链接无处可去，降级为纯文本样式） */
-function answerHTML(text: string): string {
-  const host = document.createElement('div')
-  host.innerHTML = renderMarkdownSafe(text)
-  for (const a of Array.from(host.querySelectorAll('a'))) {
-    if (!/^([a-z]+:)?\/\//i.test(a.getAttribute('href') ?? '')) a.removeAttribute('href')
-  }
-  return host.innerHTML
 }
 
 /** 首问载荷较长，用户气泡只展示划选文本本身 */
@@ -160,8 +163,10 @@ function FlowBlock({ items }: { items: FlowItem[] }) {
 }
 
 export function AskPanel({
+  courseId,
   courseTitle,
   sectionTitle,
+  currentPath,
   course,
   getProseRoot,
   getSectionText,
@@ -170,9 +175,15 @@ export function AskPanel({
   onClose,
   onOpenSettings,
   onApplyEdit,
+  onNotesChanged,
+  onOpenAnnotation,
+  onJumpToPath,
 }: {
+  courseId: string
   courseTitle: string
   sectionTitle: string
+  /** 当前课时路径：问答与标注按节归属 */
+  currentPath: string
   /** 当前课件 meta；提供后问 AI 进入 Agent 模式（可浏览/检索课件） */
   course?: CourseMeta | null
   getProseRoot: () => HTMLElement | null
@@ -183,6 +194,12 @@ export function AskPanel({
   onClose: () => void
   onOpenSettings: () => void
   onApplyEdit: (text: string) => Promise<string | null>
+  /** 标注或问答落库后通知阅读器重画标记 */
+  onNotesChanged?: () => void
+  /** 历史抽屉里点某条标注 → 交给阅读器定位并打开标注卡 */
+  onOpenAnnotation?: (a: Annotation) => void
+  /** 跳到标注所在课时 */
+  onJumpToPath?: (path: string) => void
 }) {
   const ai = useSettingsStore((s) => s.ai)
 
@@ -194,6 +211,8 @@ export function AskPanel({
   const [includeSection, setIncludeSection] = useState(false)
   const [applied, setApplied] = useState<Set<number>>(new Set())
   const [applyMsg, setApplyMsg] = useState('')
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [savedMsg, setSavedMsg] = useState('')
 
   // agent 运行中的工作流与流式文本（完成后固化进对应 turn）
   const [live, setLive] = useState('')
@@ -205,6 +224,17 @@ export function AskPanel({
   const abortRef = useRef<AbortController | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+
+  // 本轮会话的持久化身份：划词时先立（与标注一一对应），自由提问到落库时才补
+  const threadIdRef = useRef<string | null>(null)
+  const selectionRef = useRef('')
+  const ctxRef = useRef<{ sectionTitle: string; before: string; after: string }>({ sectionTitle: '', before: '', after: '' })
+  // turns 的镜像：持久化时读它拿最新一轮，而不用等 React 状态刷新
+  const turnsRef = useRef<Turn[]>([])
+  const setTurnsBoth = useCallback((updater: (t: Turn[]) => Turn[]) => {
+    turnsRef.current = updater(turnsRef.current)
+    setTurns(turnsRef.current)
+  }, [])
 
   /** 课件只读访问口（问 AI 的工具后端） */
   const courseFiles = useMemo<CourseFiles | null>(() => {
@@ -221,6 +251,46 @@ export function AskPanel({
     if (el) el.scrollTop = el.scrollHeight
   }, [])
 
+  /**
+   * 把当前会话写回库。划词问答与自由问答都在回答结束后调用——
+   * 追问会更新同一条记录（threadIdRef 不变），因此历史里看到的就是完整对话。
+   * 一字未出（模型报错 / 立刻停止）不留空壳记录。
+   */
+  const persistCurrent = useCallback(async (): Promise<AskThread | null> => {
+    const snapshot = turnsRef.current.filter((t) => t.content || t.flow?.length)
+    if (!snapshot.some((t) => t.role === 'assistant' && t.content)) return null
+    const id = threadIdRef.current ?? `${courseId}:t:${Date.now()}`
+    threadIdRef.current = id
+    const prev = await getThread(id).catch(() => undefined)
+    const now = Date.now()
+    const firstQ = snapshot.find((t) => t.role === 'user')?.content ?? ''
+    const thread: AskThread = {
+      id,
+      courseId,
+      path: prev?.path ?? currentPath,
+      sectionTitle: prev?.sectionTitle || ctxRef.current.sectionTitle,
+      selection: prev?.selection ?? selectionRef.current,
+      before: prev?.before ?? ctxRef.current.before,
+      after: prev?.after ?? ctxRef.current.after,
+      nonce: prev?.nonce ?? now,
+      label: (prev?.label || selectionRef.current || firstQ).slice(0, 80),
+      turns: snapshot.map(({ role, content, kind, flow }) => ({ role, content, kind, flow })),
+      apiMessages: apiMsgsRef.current,
+      createdAt: prev?.createdAt ?? now,
+      updatedAt: now,
+    }
+    try {
+      await saveThread(thread)
+      onNotesChanged?.()
+      setSavedMsg('已存')
+      setTimeout(() => setSavedMsg(''), 2000)
+      return thread
+    } catch (e) {
+      console.warn('[moxue] 问答存库失败', e)
+      return null
+    }
+  }, [courseId, currentPath, onNotesChanged])
+
   /** 改写模式跑一轮（单轮流式，非 agent） */
   const runStream = useCallback(
     async (payload: string) => {
@@ -230,7 +300,7 @@ export function AskPanel({
         return
       }
       apiMsgsRef.current = [...apiMsgsRef.current, { role: 'user', content: payload }]
-      setTurns((t) => [...t, { role: 'user', content: payloadDisplay(payload) }, { role: 'assistant', content: '', kind: 'edit' }])
+      setTurnsBoth((t) => [...t, { role: 'user', content: payloadDisplay(payload) }, { role: 'assistant', content: '', kind: 'edit' }])
       setError('')
       setStreaming(true)
       const controller = new AbortController()
@@ -243,7 +313,7 @@ export function AskPanel({
           signal: controller.signal,
           onDelta: (chunk) => {
             acc += chunk
-            setTurns((t) => {
+            setTurnsBoth((t) => {
               const next = [...t]
               const last = next[next.length - 1]
               if (last?.role === 'assistant') next[next.length - 1] = { ...last, content: last.content + chunk }
@@ -255,7 +325,7 @@ export function AskPanel({
         const answer = full || acc
         const clean = stripFenceWrap(answer)
         apiMsgsRef.current = [...apiMsgsRef.current, { role: 'assistant', content: answer }]
-        setTurns((t) => {
+        setTurnsBoth((t) => {
           const next = [...t]
           const last = next[next.length - 1]
           if (last?.role === 'assistant') next[next.length - 1] = { ...last, content: clean, done: true }
@@ -267,19 +337,19 @@ export function AskPanel({
           if (acc) {
             const clean = stripFenceWrap(acc)
             apiMsgsRef.current = [...apiMsgsRef.current, { role: 'assistant', content: acc }]
-            setTurns((t) => {
+            setTurnsBoth((t) => {
               const next = [...t]
               const last = next[next.length - 1]
               if (last?.role === 'assistant') next[next.length - 1] = { ...last, content: clean, done: true }
               return next
             })
           } else {
-            setTurns((t) => (t[t.length - 1]?.role === 'assistant' ? t.slice(0, -1) : t))
+            setTurnsBoth((t) => (t[t.length - 1]?.role === 'assistant' ? t.slice(0, -1) : t))
           }
         } else {
           setError(describeAIError(e))
           // 一字未出的空占位撤掉，留着已生成部分
-          setTurns((t) => {
+          setTurnsBoth((t) => {
             const last = t[t.length - 1]
             return last?.role === 'assistant' && !last.content ? t.slice(0, -1) : t
           })
@@ -300,7 +370,7 @@ export function AskPanel({
         setError('尚未配置 AI：请先填写请求地址与 API Key。')
         return
       }
-      setTurns((t) => [...t, { role: 'user', content: display }, { role: 'assistant', content: '', kind: 'ask' }])
+      setTurnsBoth((t) => [...t, { role: 'user', content: display }, { role: 'assistant', content: '', kind: 'ask' }])
       setError('')
       setStreaming(true)
       setLive('')
@@ -347,7 +417,7 @@ export function AskPanel({
         })
         const shown = answer || acc
         historyRef.current = [...historyRef.current, { q: display, a: shown }]
-        setTurns((t) => {
+        setTurnsBoth((t) => {
           const next = [...t]
           const last = next[next.length - 1]
           if (last?.role === 'assistant') next[next.length - 1] = { ...last, content: shown, done: true, flow: [...flow] }
@@ -358,18 +428,18 @@ export function AskPanel({
         if (isAbortError(e)) {
           // 用户停止：保留已生成的部分与工作流
           if (acc || hasFlow) {
-            setTurns((t) => {
+            setTurnsBoth((t) => {
               const next = [...t]
               const last = next[next.length - 1]
               if (last?.role === 'assistant') next[next.length - 1] = { ...last, content: acc, done: true, flow: [...flow] }
               return next
             })
           } else {
-            setTurns((t) => (t[t.length - 1]?.role === 'assistant' ? t.slice(0, -1) : t))
+            setTurnsBoth((t) => (t[t.length - 1]?.role === 'assistant' ? t.slice(0, -1) : t))
           }
         } else {
           setError(describeAIError(e))
-          setTurns((t) => {
+          setTurnsBoth((t) => {
             const next = [...t]
             const last = next[next.length - 1]
             if (last?.role === 'assistant' && (last.content || hasFlow)) {
@@ -385,24 +455,87 @@ export function AskPanel({
         setLiveFlow([])
         liveFlowRef.current = []
         abortRef.current = null
+        // 回答落定即入库：历史抽屉里立刻能看到，切页/关页也不丢
+        void persistCurrent()
       }
     },
-    [courseFiles, courseTitle, sectionTitle, scrollToEnd],
+    [courseFiles, courseTitle, sectionTitle, scrollToEnd, persistCurrent],
   )
 
-  // 新划问（nonce 变化）→ 开新会话
+  // 新一轮会话（nonce 变化）：历史复现直接装载；新划词先立标注与问答记录，再开问
   const lastNonce = useRef<number>(-1)
   useEffect(() => {
     if (!seed || seed.nonce === lastNonce.current) return
     lastNonce.current = seed.nonce
     apiMsgsRef.current = []
     historyRef.current = []
-    setTurns([])
+    setTurnsBoth(() => [])
     setMode('ask')
     setApplied(new Set())
-    const root = getProseRoot()
-    const ctx = extractAskContext(root ?? document.body, seed.selection)
-    void runAgentAsk(buildSelectionPayload(ctx, courseTitle), ctx.selection)
+    setError('')
+    setSavedMsg('')
+
+    // ① 历史复现：读本地记录，不发请求、不新建记录
+    if (seed.thread) {
+      applyThread(seed.thread)
+      return
+    }
+
+    // ② 新划词 / 从标注继续问：解析上下文 → 立标注与记录 → 问 AI
+    const host = getProseRoot() ?? document.body
+    const threadId = `${courseId}:t:${seed.nonce}`
+    void (async () => {
+      let ctx: AskContext
+      if (seed.annotationId) {
+        // 从已有标注进入（该标注还没有问答）：按锚点还原选区，重新取上下文
+        const ann = await getAnnotation(seed.annotationId).catch(() => undefined)
+        if (!ann) return
+        const hit = resolveAnchor(host, ann.anchor)
+        ctx = extractAskContext(host, ann.anchor.text, hit?.range)
+        if (ann.sectionTitle) ctx = { ...ctx, sectionTitle: ann.sectionTitle }
+        await updateAnnotation(ann.id, { threadId }).catch(() => undefined)
+      } else {
+        ctx = extractAskContext(host, seed.selection)
+        // 划词即成标注：先上墨（高亮），笔记可稍后补
+        const anchor = anchorFromSelection(host, ctx.selection)
+        if (anchor) {
+          const now = Date.now()
+          await saveAnnotation({
+            id: `${courseId}:a:${seed.nonce}`,
+            courseId,
+            path: currentPath,
+            sectionTitle: ctx.sectionTitle,
+            anchor,
+            style: 'highlight',
+            note: '',
+            threadId,
+            createdAt: now,
+            updatedAt: now,
+          }).catch(() => undefined)
+        }
+      }
+      selectionRef.current = ctx.selection
+      ctxRef.current = { sectionTitle: ctx.sectionTitle, before: ctx.before, after: ctx.after }
+      threadIdRef.current = threadId
+      const now = Date.now()
+      // 先写占位记录：问答进行中它就已出现在历史里（实时查看），回答完原地补齐
+      await saveThread({
+        id: threadId,
+        courseId,
+        path: currentPath,
+        sectionTitle: ctx.sectionTitle,
+        selection: ctx.selection,
+        before: ctx.before,
+        after: ctx.after,
+        nonce: seed.nonce,
+        label: ctx.selection.slice(0, 80),
+        turns: [],
+        createdAt: now,
+        updatedAt: now,
+      }).catch(() => undefined)
+      onNotesChanged?.()
+      void runAgentAsk(buildSelectionPayload(ctx, courseTitle), ctx.selection)
+    })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seed?.nonce])
 
@@ -459,16 +592,59 @@ export function AskPanel({
     el.style.height = `${Math.min(el.scrollHeight, 144)}px`
   }
 
+  /** 就地复现一段历史会话：只读本地记录，不重发任何请求，之后可继续追问 */
+  const applyThread = useCallback(
+    (t: AskThread) => {
+      abortRef.current?.abort()
+      apiMsgsRef.current = t.apiMessages ?? []
+      threadIdRef.current = t.id
+      selectionRef.current = t.selection
+      ctxRef.current = { sectionTitle: t.sectionTitle, before: t.before, after: t.after }
+      const answers = t.turns.filter((x) => x.role === 'assistant')
+      let ai = 0
+      historyRef.current = t.turns
+        .filter((x) => x.role === 'user')
+        .map((q) => ({ q: q.content, a: answers[ai++]?.content ?? '' }))
+      setTurnsBoth(() => t.turns.map((x) => ({ ...x, done: true })))
+      setMode('ask')
+      setError('')
+      setHistoryOpen(false)
+      setSavedMsg('')
+      setTimeout(scrollToEnd, 0)
+    },
+    [setTurnsBoth, scrollToEnd],
+  )
+
+  const openThread = useCallback(
+    (t: AskThread) => {
+      setHistoryOpen(false)
+      applyThread(t)
+    },
+    [applyThread],
+  )
+
   return (
-    <aside className="flex h-full w-full shrink-0 flex-col border-l border-ink/15 bg-paper-deep/30 sm:w-[420px]">
+    <aside className="relative flex h-full w-full shrink-0 flex-col border-l border-ink/15 bg-paper-deep/30 sm:w-[420px]">
       <header className="flex items-center justify-between border-b border-ink/10 px-4 py-3">
         <div className="min-w-0">
           <h2 className="font-song text-sm font-bold tracking-widest text-ink">问 AI</h2>
-          <p className="mt-0.5 truncate text-xs text-ink-faint">{courseTitle}</p>
+          <p className="mt-0.5 truncate text-xs text-ink-faint">
+            {courseTitle}
+            {savedMsg && <span className="ml-2 text-cinnabar">✓ {savedMsg}</span>}
+          </p>
         </div>
-        <button className="text-ink-faint transition hover:text-cinnabar" onClick={onClose} aria-label="关闭问答">
-          ✕
-        </button>
+        <div className="flex shrink-0 items-center gap-3">
+          <button
+            className="border border-ink/15 px-2 py-0.5 text-xs text-ink-soft transition hover:border-cinnabar/50 hover:text-cinnabar-deep"
+            onClick={() => setHistoryOpen(true)}
+            title="本书的划词标注与问答历史"
+          >
+            历史
+          </button>
+          <button className="text-ink-faint transition hover:text-cinnabar" onClick={onClose} aria-label="关闭问答">
+            ✕
+          </button>
+        </div>
       </header>
 
       {!ai.apiKey || !ai.model ? (
@@ -630,6 +806,16 @@ export function AskPanel({
           </footer>
         </>
       )}
+
+      {/* 历史抽屉：盖在面板上，点一段问答就地复现，点标注交回阅读器定位 */}
+      <AskHistory
+        courseId={courseId}
+        open={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        onOpenThread={openThread}
+        onOpenAnnotation={(a) => onOpenAnnotation?.(a)}
+        onJumpToPath={(p) => onJumpToPath?.(p)}
+      />
     </aside>
   )
 }

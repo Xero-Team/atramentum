@@ -10,6 +10,12 @@ import { useSelectionProbe } from '../ask/SelectionWatcher'
 import { FloatingToolbar } from '../ask/FloatingToolbar'
 import { AskPanel } from '../ask/AskPanel'
 import type { AskSeed } from '../ask/AskPanel'
+import { AnnotationCard } from '../ask/AnnotationCard'
+import { annotationAtPoint, clearMarks, highlightsSupported, paintMarks, scrollToAnnotation } from '../ask/marks'
+import { anchorFromSelection } from '../ask/offsets'
+import { extractAskContext } from '../ask/context'
+import type { Annotation, AskThread } from '../ask/types'
+import { getThread, listAnnotationsForPath, saveAnnotation } from '../course/dbStore'
 import { SettingsDialog } from './SettingsDialog'
 import { exportCourseZip } from '../io/export'
 import { useCategoryStore } from '../store/categoryStore'
@@ -110,8 +116,10 @@ export default function Reader() {
   // 折叠状态：存「已展开」的章路径；默认展开含当前节的那一章
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
 
-  // AI 面板（仅 md 课件；书籍类不做划词/问答）
-  const askAvailable = meta ? aiEnabled(meta) : false
+  // AI 面板：任何格式都能划词问 AI（书籍同样可标注、记笔记）
+  const askAvailable = phase === 'ready'
+  // 「改写本节 / 整书改写」仍只对 md 课件开放
+  const canEdit = meta ? aiEnabled(meta) : false
   const [askOpen, setAskOpen] = useState(false)
   const [askSeed, setAskSeed] = useState<AskSeed | null>(null)
   const [showSettings, setShowSettings] = useState(false)
@@ -121,7 +129,25 @@ export default function Reader() {
   const [reloadNonce, setReloadNonce] = useState(0)
   const [exporting, setExporting] = useState(false)
   const [exportMsg, setExportMsg] = useState('')
-  const { probe, clearProbe } = useSelectionProbe(mountRef, phase === 'ready' && askAvailable)
+  // 划词标注（当前节）与标注卡
+  const [annotations, setAnnotations] = useState<Annotation[]>([])
+  const [notesNonce, setNotesNonce] = useState(0)
+  const [card, setCard] = useState<{ ann: Annotation; thread: AskThread | null; x: number; y: number } | null>(null)
+  // 从历史抽屉定位到别的节时，等标注重画完成再滚过去
+  const pendingFocusRef = useRef<string | null>(null)
+  const { probe, clearProbe } = useSelectionProbe(mountRef, askAvailable)
+  const reloadNotes = useCallback(() => setNotesNonce((n) => n + 1), [])
+
+  /** 正文容器（mountMarkdown 挂载的 .prose / .book-text 根）；标注与划词上下文都基于它 */
+  const getProseRoot = useCallback(() => {
+    const first = mountRef.current?.firstElementChild
+    return first instanceof HTMLElement ? first : null
+  }, [])
+
+  const getSectionText = useCallback(async (): Promise<string | null> => {
+    if (!meta || !currentPath) return null
+    return storeFor(meta.source).readFile(courseId, currentPath)
+  }, [meta, courseId, currentPath])
 
   const handleExport = useCallback(async () => {
     if (!meta || exporting) return
@@ -138,12 +164,71 @@ export default function Reader() {
     }
   }, [meta, exporting])
 
+  /** 划词 → 起一轮带上下文的问答（nonce 用时间戳，做题号也当会话 id 用） */
   const handleAsk = useCallback(() => {
     if (!probe?.text) return
-    setAskSeed((prev) => ({ selection: probe.text, nonce: (prev?.nonce ?? 0) + 1 }))
+    setAskSeed({ selection: probe.text, nonce: Date.now() })
     setAskOpen(true)
     clearProbe()
   }, [probe, clearProbe])
+
+  /** 划词 → 只上墨（高亮）+ 开笔记卡，不打扰 AI */
+  const handleMark = useCallback(async () => {
+    const text = probe?.text
+    const spot = probe ? { x: probe.x, y: probe.y } : null
+    clearProbe()
+    if (!text || !meta || !currentPath || !spot) return
+    const host = getProseRoot()
+    if (!host) return
+    const anchor = anchorFromSelection(host, text)
+    if (!anchor) {
+      setExportMsg('这段文字跨了多个区块，暂时无法标注——缩短选区再试')
+      setTimeout(() => setExportMsg(''), 4000)
+      return
+    }
+    const now = Date.now()
+    const ann: Annotation = {
+      id: `${meta.id}:a:${now}`,
+      courseId: meta.id,
+      path: currentPath,
+      sectionTitle: extractAskContext(host, text).sectionTitle,
+      anchor,
+      style: 'highlight',
+      note: '',
+      createdAt: now,
+      updatedAt: now,
+    }
+    try {
+      await saveAnnotation(ann)
+      reloadNotes()
+      setCard({ ann, thread: null, x: spot.x, y: spot.y })
+    } catch (e) {
+      setExportMsg(`标注失败：${(e as Error).message}`)
+      setTimeout(() => setExportMsg(''), 4000)
+    }
+  }, [probe, clearProbe, meta, currentPath, getProseRoot, reloadNotes])
+
+  /** 点正文里的高亮/下划线 → 开标注卡（带出关联的问答） */
+  const openCard = useCallback(async (ann: Annotation, x: number, y: number) => {
+    const t = ann.threadId ? await getThread(ann.threadId).catch(() => undefined) : undefined
+    setCard({ ann, thread: t ?? null, x, y })
+  }, [])
+
+  /** 从 AI 面板的历史抽屉点某条标注 → 跳过去并打开卡片 */
+  const openAnnotationFromPanel = useCallback(
+    async (ann: Annotation) => {
+      setAskOpen(false)
+      if (ann.path && ann.path !== currentPath) {
+        // 换节后正文要重新取，等标注重画完成再滚过去（见下面的 paint 副作用）
+        pendingFocusRef.current = ann.id
+        setSearchParams({ path: ann.path })
+      } else {
+        scrollToAnnotation(ann.id)
+      }
+      void openCard(ann, window.innerWidth / 2, 120)
+    },
+    [currentPath, setSearchParams, openCard],
+  )
 
   /** 整书改写：内置课件先 fork 成可编辑副本，其余来源直接写回原书 */
   const handleRewrite = useCallback(async () => {
@@ -165,17 +250,6 @@ export default function Reader() {
       setForking(false)
     }
   }, [meta, forking, openGenerate])
-
-  const getProseRoot = useCallback(() => {
-    // mountMarkdown 挂载的 .prose 根是 mountRef 的首子元素
-    const first = mountRef.current?.firstElementChild
-    return first instanceof HTMLElement ? first : null
-  }, [])
-
-  const getSectionText = useCallback(async (): Promise<string | null> => {
-    if (!meta || !currentPath) return null
-    return storeFor(meta.source).readFile(courseId, currentPath)
-  }, [meta, courseId, currentPath])
 
   /** AI 改写应用：builtin 先 fork 成副本并跳转；本地课件直接写回并刷新正文 */
   const handleApplyEdit = useCallback(
@@ -356,6 +430,37 @@ export default function Reader() {
     scrollRef.current?.scrollTo({ top: 0 })
   }, [content, currentPath])
 
+  // 当前节的划词标注（正文更新后重取：AI 改写会让锚点需要重新对齐）
+  useEffect(() => {
+    if (!courseId || !currentPath) {
+      setAnnotations([])
+      return
+    }
+    let alive = true
+    listAnnotationsForPath(courseId, currentPath)
+      .then((list) => {
+        if (alive) setAnnotations(list)
+      })
+      .catch((e) => console.warn('[moxue] 读取标注失败', e))
+    return () => {
+      alive = false
+    }
+  }, [courseId, currentPath, notesNonce, content])
+
+  // 上墨：声明在正文渲染之后，同一轮提交里先换 DOM 再画标记
+  useEffect(() => {
+    const root = mountRef.current?.firstElementChild
+    if (!(root instanceof HTMLElement) || content === null) return
+    if (annotations.length > 0 && !highlightsSupported()) {
+      // 老浏览器（无 CSS Custom Highlight API）降级：标注仍存着，历史里可看可编辑，只是不上色
+      console.info('[moxue] 当前浏览器不支持 CSS Custom Highlight API，划词标注不上色')
+    }
+    paintMarks(root, annotations)
+    const focus = pendingFocusRef.current
+    if (focus && scrollToAnnotation(focus)) pendingFocusRef.current = null
+    return () => clearMarks()
+  }, [annotations, content, currentPath])
+
   const toggle = useCallback((path: string) => {
     setExpanded((prev) => {
       const next = new Set(prev)
@@ -375,14 +480,23 @@ export default function Reader() {
   const onBodyClick = useCallback(
     (e: ReactMouseEvent) => {
       const a = (e.target as HTMLElement).closest('a')
-      if (!a) return
-      const resolved = a.dataset.courseLink
-      if (resolved) {
-        e.preventDefault()
-        goTo(resolved)
+      if (a) {
+        const resolved = a.dataset.courseLink
+        if (resolved) {
+          e.preventDefault()
+          goTo(resolved)
+        }
+        return
       }
+      // 标注命中 → 开标注卡（看问答 / 写笔记 / 换样式）
+      const hit = annotationAtPoint(e.clientX, e.clientY)
+      if (hit) {
+        void openCard(hit, e.clientX, e.clientY)
+        return
+      }
+      setCard(null)
     },
-    [goTo],
+    [goTo, openCard],
   )
 
   // 当前节在扁平序列里的位置（上下篇导航）
@@ -541,23 +655,45 @@ export default function Reader() {
         </div>
       </main>
 
-      {/* 右：AI 面板（仅 md 课件；内置课改写时会自动另存为可编辑副本） */}
-      {askOpen && askAvailable && (
+      {/* 右：AI 面板（md 课件可改写；书籍亦可划词问 AI、标注记笔记） */}
+      {askOpen && askAvailable && meta && (
         <AskPanel
-          courseTitle={meta?.title ?? courseId}
+          key={meta.id}
+          courseId={meta.id}
+          courseTitle={meta.title}
           sectionTitle={lessonTitle}
+          currentPath={currentPath}
           course={meta}
           getProseRoot={getProseRoot}
           getSectionText={getSectionText}
           seed={askSeed}
-          canEdit
+          canEdit={canEdit}
           onClose={() => setAskOpen(false)}
           onOpenSettings={() => setShowSettings(true)}
           onApplyEdit={handleApplyEdit}
+          onNotesChanged={reloadNotes}
+          onOpenAnnotation={(a) => void openAnnotationFromPanel(a)}
+          onJumpToPath={goTo}
         />
       )}
 
-      {probe && <FloatingToolbar x={probe.x} y={probe.y} onAsk={handleAsk} />}
+      {card && (
+        <AnnotationCard
+          annotation={annotations.find((a) => a.id === card.ann.id) ?? card.ann}
+          thread={card.thread}
+          x={card.x}
+          y={card.y}
+          onClose={() => setCard(null)}
+          onChanged={reloadNotes}
+          onOpenThread={(t) => {
+            setCard(null)
+            setAskSeed({ selection: t.selection, nonce: Date.now(), thread: t })
+            setAskOpen(true)
+          }}
+        />
+      )}
+
+      {probe && <FloatingToolbar x={probe.x} y={probe.y} onAsk={handleAsk} onMark={() => void handleMark()} />}
       {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} />}
       <GenerateBadge />
     </div>
