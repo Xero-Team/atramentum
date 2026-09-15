@@ -8,10 +8,9 @@ import { runAskAgent } from './agent'
 import type { AgentStep, CourseFiles, FlowItem } from './agent'
 import type { AskContext } from './context'
 import { extractAskContext } from './context'
-import type { Annotation, AskThread } from './types'
+import type { AskThread } from './types'
 import { anchorFromSelection, resolveAnchor } from './offsets'
 import { answerHTML } from './render'
-import { AskHistory } from './AskHistory'
 import { getAnnotation, getThread, saveAnnotation, saveThread, updateAnnotation } from '../course/dbStore'
 import { storeFor } from '../course'
 import type { CourseMeta } from '../types/course'
@@ -176,8 +175,7 @@ export function AskPanel({
   onOpenSettings,
   onApplyEdit,
   onNotesChanged,
-  onOpenAnnotation,
-  onJumpToPath,
+  onOpenHistory,
 }: {
   courseId: string
   courseTitle: string
@@ -196,10 +194,8 @@ export function AskPanel({
   onApplyEdit: (text: string) => Promise<string | null>
   /** 标注或问答落库后通知阅读器重画标记 */
   onNotesChanged?: () => void
-  /** 历史抽屉里点某条标注 → 交给阅读器定位并打开标注卡 */
-  onOpenAnnotation?: (a: Annotation) => void
-  /** 跳到标注所在课时 */
-  onJumpToPath?: (path: string) => void
+  /** 打开问答历史抽屉（抽屉挂在阅读器层，从屏幕左侧滑出） */
+  onOpenHistory?: () => void
 }) {
   const ai = useSettingsStore((s) => s.ai)
 
@@ -211,7 +207,6 @@ export function AskPanel({
   const [includeSection, setIncludeSection] = useState(false)
   const [applied, setApplied] = useState<Set<number>>(new Set())
   const [applyMsg, setApplyMsg] = useState('')
-  const [historyOpen, setHistoryOpen] = useState(false)
   const [savedMsg, setSavedMsg] = useState('')
 
   // agent 运行中的工作流与流式文本（完成后固化进对应 turn）
@@ -608,19 +603,10 @@ export function AskPanel({
       setTurnsBoth(() => t.turns.map((x) => ({ ...x, done: true })))
       setMode('ask')
       setError('')
-      setHistoryOpen(false)
       setSavedMsg('')
       setTimeout(scrollToEnd, 0)
     },
     [setTurnsBoth, scrollToEnd],
-  )
-
-  const openThread = useCallback(
-    (t: AskThread) => {
-      setHistoryOpen(false)
-      applyThread(t)
-    },
-    [applyThread],
   )
 
   return (
@@ -636,8 +622,8 @@ export function AskPanel({
         <div className="flex shrink-0 items-center gap-3">
           <button
             className="border border-ink/15 px-2 py-0.5 text-xs text-ink-soft transition hover:border-cinnabar/50 hover:text-cinnabar-deep"
-            onClick={() => setHistoryOpen(true)}
-            title="本书的划词标注与问答历史"
+            onClick={() => onOpenHistory?.()}
+            title="本书的划词标注与问答历史（从左侧滑出）"
           >
             历史
           </button>
@@ -806,16 +792,6 @@ export function AskPanel({
           </footer>
         </>
       )}
-
-      {/* 历史抽屉：盖在面板上，点一段问答就地复现，点标注交回阅读器定位 */}
-      <AskHistory
-        courseId={courseId}
-        open={historyOpen}
-        onClose={() => setHistoryOpen(false)}
-        onOpenThread={openThread}
-        onOpenAnnotation={(a) => onOpenAnnotation?.(a)}
-        onJumpToPath={(p) => onJumpToPath?.(p)}
-      />
     </aside>
   )
 }

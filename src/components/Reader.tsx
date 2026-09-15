@@ -11,6 +11,7 @@ import { FloatingToolbar } from '../ask/FloatingToolbar'
 import { AskPanel } from '../ask/AskPanel'
 import type { AskSeed } from '../ask/AskPanel'
 import { AnnotationCard } from '../ask/AnnotationCard'
+import { AskHistory } from '../ask/AskHistory'
 import { annotationAtPoint, clearMarks, highlightsSupported, paintMarks, scrollToAnnotation } from '../ask/marks'
 import { anchorFromSelection } from '../ask/offsets'
 import { extractAskContext } from '../ask/context'
@@ -133,6 +134,7 @@ export default function Reader() {
   const [annotations, setAnnotations] = useState<Annotation[]>([])
   const [notesNonce, setNotesNonce] = useState(0)
   const [card, setCard] = useState<{ ann: Annotation; thread: AskThread | null; x: number; y: number } | null>(null)
+  const [historyOpen, setHistoryOpen] = useState(false)
   // 从历史抽屉定位到别的节时，等标注重画完成再滚过去
   const pendingFocusRef = useRef<string | null>(null)
   const { probe, clearProbe } = useSelectionProbe(mountRef, askAvailable)
@@ -215,10 +217,10 @@ export default function Reader() {
     setCard({ ann, thread: t ?? null, x, y })
   }, [])
 
-  /** 从 AI 面板的历史抽屉点某条标注 → 跳过去并打开卡片 */
+  /** 从历史抽屉点某条标注 → 跳过去并打开卡片 */
   const openAnnotationFromPanel = useCallback(
     async (ann: Annotation) => {
-      setAskOpen(false)
+      setHistoryOpen(false)
       if (ann.path && ann.path !== currentPath) {
         // 换节后正文要重新取，等标注重画完成再滚过去（见下面的 paint 副作用）
         pendingFocusRef.current = ann.id
@@ -230,6 +232,13 @@ export default function Reader() {
     },
     [currentPath, setSearchParams, openCard],
   )
+
+  /** 从历史抽屉点某段问答 → 打开面板并就地复现整段对话（读本地，不重发请求） */
+  const openThreadFromHistory = useCallback((t: AskThread) => {
+    setHistoryOpen(false)
+    setAskSeed({ selection: t.selection, nonce: Date.now(), thread: t })
+    setAskOpen(true)
+  }, [])
 
   /** 整书改写：内置课件先 fork 成可编辑副本，其余来源直接写回原书 */
   const handleRewrite = useCallback(async () => {
@@ -576,6 +585,13 @@ export default function Reader() {
                 问 AI
               </button>
             )}
+            <button
+              className="border border-ink/15 px-2.5 py-1 text-ink-soft transition hover:border-cinnabar/50 hover:text-cinnabar-deep"
+              onClick={() => setHistoryOpen(true)}
+              title="本书的划词标注与问答历史（从左侧滑出）"
+            >
+              历史
+            </button>
             {meta?.source === 'generated' && (
               <button
                 className="border border-ink/15 px-2.5 py-1 text-ink-soft transition hover:border-cinnabar/50 hover:text-cinnabar-deep"
@@ -673,8 +689,7 @@ export default function Reader() {
           onOpenSettings={() => setShowSettings(true)}
           onApplyEdit={handleApplyEdit}
           onNotesChanged={reloadNotes}
-          onOpenAnnotation={(a) => void openAnnotationFromPanel(a)}
-          onJumpToPath={goTo}
+          onOpenHistory={() => setHistoryOpen(true)}
         />
       )}
 
@@ -693,6 +708,16 @@ export default function Reader() {
           }}
         />
       )}
+
+      {/* 历史抽屉：从屏幕左侧滑出，盖在目录树之上 */}
+      <AskHistory
+        courseId={meta?.id ?? courseId}
+        open={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        onOpenThread={openThreadFromHistory}
+        onOpenAnnotation={(a) => void openAnnotationFromPanel(a)}
+        onJumpToPath={goTo}
+      />
 
       {probe && <FloatingToolbar x={probe.x} y={probe.y} onAsk={handleAsk} onMark={() => void handleMark()} />}
       {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} />}

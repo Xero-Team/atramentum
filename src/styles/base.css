@@ -12,3 +12,21 @@
     color: #f5f1e8;
   }
 }
+
+/* 左侧滑出的历史抽屉 */
+@keyframes moxue-drawer-in {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+.drawer-in {
+  animation: moxue-drawer-in 0.18s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .drawer-in {
+    animation: none;
+  }
+}
