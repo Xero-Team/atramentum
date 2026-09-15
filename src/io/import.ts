@@ -16,6 +16,9 @@ export interface RawEntry {
   data: Uint8Array
 }
 
+/** 随书导出的划词标注文件（见 io/notes.ts）：识别它以便复原笔记，且绝不当课件内容入库 */
+export const NOTES_FILE = 'moxue-notes.json'
+
 // 与 bundle 脚本同款白名单；全部按 UTF-8 文本解码入库
 const INCLUDE_EXT = new Set([
   '.md', '.txt', '.c', '.h', '.cpp', '.hpp', '.rs', '.toml', '.json',
@@ -149,6 +152,22 @@ export function normalizeEntries(entries: RawEntry[]): { path: string; text: str
   return cleaned.map((e) => ({ path: e.path, text: dec.decode(e.data) }))
 }
 
+/**
+ * 摘出随书导出的标注文件：先取走 moxue-notes.json，其余照常入课件。
+ * 必须摘——否则它会作为一篇「课时」混进目录树（json 在白名单里）。
+ */
+export function splitNotesEntry(entries: RawEntry[]): { entries: RawEntry[]; notesRaw: string | null } {
+  const idx = entries.findIndex((e) => (e.path.split('/').pop() ?? '') === NOTES_FILE)
+  if (idx < 0) return { entries, notesRaw: null }
+  let notesRaw: string | null = null
+  try {
+    notesRaw = new TextDecoder('utf-8', { fatal: false }).decode(entries[idx].data)
+  } catch {
+    notesRaw = null
+  }
+  return { entries: entries.filter((_, i) => i !== idx), notesRaw }
+}
+
 /* ───────── 标题推断 ───────── */
 
 /** 文件名 → 课件标题：取末段、去扩展名（含 .tar.gz）、去数字前缀、分隔符转空格 */
@@ -164,7 +183,9 @@ export function titleFromFileName(name: string): string {
 
 /** 目录/多文件导入推断标题：全部共享无扩展名根目录 → 用目录名；否则用首个文件名 */
 export function guessCourseTitle(entries: RawEntry[]): string {
-  const cleaned = entries.filter((e) => e.path && !isJunk(e.path) && allowedExt(e.path))
+  const cleaned = entries.filter(
+    (e) => e.path && !isJunk(e.path) && allowedExt(e.path) && (e.path.split('/').pop() ?? '') !== NOTES_FILE,
+  )
   const root = cleaned[0]?.path.split('/')[0] ?? ''
   if (root && !root.includes('.') && cleaned.every((e) => e.path.startsWith(`${root}/`))) {
     return root.replace(/^\d+[\s._-]*/, '').replace(/[_-]+/g, ' ').trim()

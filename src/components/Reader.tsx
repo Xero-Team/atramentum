@@ -154,8 +154,9 @@ export default function Reader() {
     setExporting(true)
     setExportMsg('')
     try {
-      const missing = await exportCourseZip(meta)
-      setExportMsg(missing > 0 ? `已导出（${missing} 个文件缺失被跳过）` : '')
+      const r = await exportCourseZip(meta)
+      const parts = [r.missing > 0 ? `${r.missing} 个文件缺失被跳过` : '', r.notes > 0 ? `含 ${r.notes} 条标注` : '']
+      setExportMsg(parts.filter(Boolean).join(' · '))
       setTimeout(() => setExportMsg(''), 4000)
     } catch (e) {
       setExportMsg(`导出失败：${(e as Error).message}`)

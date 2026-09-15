@@ -1,4 +1,5 @@
-// 导入对话框：压缩包（zip / tar.gz / rar）、文件夹拖拽、PDF / EPUB 书籍 → 按分类入库
+// 导入对话框：压缩包（zip / tar.gz / rar）、文件夹拖拽、PDF / EPUB 书籍 → 按分类入库；
+// 包内若带 moxue-notes.json（导出 zip 的副产品）则一并复原该书划词标注与问答
 import { useRef, useState } from 'react'
 import type { DragEvent as ReactDragEvent } from 'react'
 import {
@@ -11,17 +12,21 @@ import {
   ingestBookFromPdf,
   ingestCourse,
   normalizeEntries,
+  splitNotesEntry,
 } from '../io/import'
 import type { RawEntry } from '../io/import'
+import { parseNotesBundle } from '../io/notes'
+import { restoreNotes } from '../io/notesDb'
+import type { CourseMeta } from '../types/course'
 import { UNCATEGORIZED, useCategoryStore } from '../store/categoryStore'
 import { Overlay } from './common/Overlay'
 
 const inputCls =
   'w-full border border-ink/20 bg-paper px-2.5 py-1.5 text-sm text-ink outline-none transition focus:border-cinnabar'
 
-type IngestFn = (title: string) => Promise<{ meta: { id: string } }>
+type IngestFn = (title: string) => Promise<{ meta: CourseMeta }>
 
-export function ImportDialog({ onClose, onImported }: { onClose: () => void; onImported: () => void }) {
+export function ImportDialog({ onClose, onImported }: { onClose: () => void; onImported: (notice?: string) => void }) {
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
   const [dragOver, setDragOver] = useState(false)
@@ -33,6 +38,24 @@ export function ImportDialog({ onClose, onImported }: { onClose: () => void; onI
   const [title, setTitle] = useState('')
   const zipInputRef = useRef<HTMLInputElement>(null)
   const dirInputRef = useRef<HTMLInputElement>(null)
+  // 本次导入包里摘出的标注文件（若有），入库成功后复原到对应书上
+  const notesRef = useRef<string | null>(null)
+
+  /** 入库成功后把包里的划词标注复原到这本书上 */
+  const restoreNotesFor = async (meta: CourseMeta): Promise<string> => {
+    const raw = notesRef.current
+    notesRef.current = null
+    if (!raw) return ''
+    const bundle = parseNotesBundle(raw)
+    if (!bundle) return ''
+    try {
+      const r = await restoreNotes(bundle, meta)
+      if (r.annotations === 0 && r.threads === 0) return ''
+      return `已随书恢复 ${r.annotations} 条划词标注、${r.threads} 段问答。`
+    } catch (e) {
+      return `课件已导入，但标注恢复失败：${(e as Error).message}`
+    }
+  }
 
   const run = async (ingest: IngestFn) => {
     setBusy(true)
@@ -40,13 +63,26 @@ export function ImportDialog({ onClose, onImported }: { onClose: () => void; onI
     try {
       const { meta } = await ingest(title.trim())
       if (category) assignTo(meta.id, category)
-      onImported()
+      const notice = await restoreNotesFor(meta)
+      onImported(notice || undefined)
       onClose()
     } catch (e) {
       setMsg((e as Error)?.message ?? String(e))
     } finally {
       setBusy(false)
     }
+  }
+
+  /** 整课入库的统一入口：先摘走标注文件，再走原有清洗管线 */
+  const ingestRaw = (raw: RawEntry[], t: string): Promise<{ meta: CourseMeta }> => {
+    const { entries, notesRaw } = splitNotesEntry(raw)
+    notesRef.current = notesRaw
+    return ingestCourse(normalizeEntries(entries), {
+      source: 'imported',
+      title: guessCourseTitle(entries) || t,
+      desc: `导入课件 · ${entries.length} 个文件`,
+      category,
+    })
   }
 
   /** 单文件：按扩展名分流（压缩包 / EPUB / PDF）。压缩包的标题在解包后推断，覆盖输入框默认值 */
@@ -60,13 +96,7 @@ export function ImportDialog({ onClose, onImported }: { onClose: () => void; onI
         : /\.zip$/i.test(file.name)
           ? fromZip(data)
           : fromTarGz(data)
-      const guessed = guessCourseTitle(raw) || t
-      return ingestCourse(normalizeEntries(raw), {
-        source: 'imported',
-        title: guessed,
-        desc: `导入课件 · ${raw.length} 个文件`,
-        category,
-      })
+      return ingestRaw(raw, t)
     }
   }
 
@@ -83,15 +113,7 @@ export function ImportDialog({ onClose, onImported }: { onClose: () => void; onI
         return
       }
     }
-    void run(async (t) => {
-      const raw = await fromFiles(items)
-      return ingestCourse(normalizeEntries(raw), {
-        source: 'imported',
-        title: guessCourseTitle(raw) || t,
-        desc: `导入课件 · ${raw.length} 个文件`,
-        category,
-      })
-    })
+    void run(async (t) => ingestRaw(await fromFiles(items), t))
   }
 
   return (
@@ -170,6 +192,9 @@ export function ImportDialog({ onClose, onImported }: { onClose: () => void; onI
           <p className="text-xs leading-5 text-ink-faint">
             课件仅导入文本类文件（md / 代码 / 配置），单个不超过 2MB；书籍抽取文本后入库（不含图片）。
             全部保存在浏览器本地（IndexedDB），不会自动上传。
+            <br />
+            若压缩包里有导出的 <code className="font-mono">moxue-notes.json</code>（划词标注与问答），
+            会在入库后一并复原到这本书上。
           </p>
         </div>
 
@@ -202,15 +227,7 @@ export function ImportDialog({ onClose, onImported }: { onClose: () => void; onI
             e.target.value = ''
             if (files.length === 0) return
             if (!title.trim()) setTitle(guessCourseTitle(files.map((f) => ({ path: f.webkitRelativePath || f.name, data: new Uint8Array(0) }))))
-            void run(async (t) => {
-              const raw = await fromFiles(files)
-              return ingestCourse(normalizeEntries(raw), {
-                source: 'imported',
-                title: guessCourseTitle(raw) || t,
-                desc: `导入课件 · ${raw.length} 个文件`,
-                category,
-              })
-            })
+            void run(async (t) => ingestRaw(await fromFiles(files), t))
           }}
         />
       </div>

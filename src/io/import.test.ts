@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeEntries, fromZip, stripCommonRoot, titleFromFileName, guessCourseTitle } from './import'
+import {
+  normalizeEntries,
+  fromZip,
+  stripCommonRoot,
+  titleFromFileName,
+  guessCourseTitle,
+  splitNotesEntry,
+  NOTES_FILE,
+} from './import'
 import { strToU8, zipSync } from 'fflate'
 import type { RawEntry } from './import'
 
@@ -99,7 +107,32 @@ describe('guessCourseTitle', () => {
   it('垃圾/越白名单条目不参与推断', () => {
     expect(guessCourseTitle([raw('.git/config'), raw('.DS_Store'), raw('真课件.md')])).toBe('真课件')
   })
+  it('随书导出的标注文件不参与标题推断（否则可能用 moxue-notes 当书名）', () => {
+    expect(guessCourseTitle([raw(NOTES_FILE), raw('01_内核.md')])).toBe('内核')
+  })
   it('空条目 → 空标题', () => {
     expect(guessCourseTitle([])).toBe('')
+  })
+})
+
+describe('splitNotesEntry', () => {
+  it('摘走 moxue-notes.json 并解出内容，其余条目原样保留', () => {
+    const bundle = '{"format":"moxue-notes","title":"x"}'
+    const { entries, notesRaw } = splitNotesEntry([raw('INDEX.md'), raw(NOTES_FILE, bundle), raw('lesson01.md')])
+    expect(entries.map((e) => e.path)).toEqual(['INDEX.md', 'lesson01.md'])
+    expect(notesRaw).toBe(bundle)
+  })
+
+  it('没有该文件 → 原样返回（普通课件包行为不变）', () => {
+    const input = [raw('INDEX.md'), raw('lesson01.md')]
+    const { entries, notesRaw } = splitNotesEntry(input)
+    expect(entries).toBe(input)
+    expect(notesRaw).toBeNull()
+  })
+
+  it('子目录里的同名文件也算（压缩整门课的包常见带一层根目录）', () => {
+    const { entries, notesRaw } = splitNotesEntry([raw(`course/${NOTES_FILE}`, '{"format":"moxue-notes"}')])
+    expect(entries).toHaveLength(0)
+    expect(notesRaw).toBe('{"format":"moxue-notes"}')
   })
 })

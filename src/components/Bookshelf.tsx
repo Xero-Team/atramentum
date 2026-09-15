@@ -189,6 +189,7 @@ function CourseCard({
 export default function Bookshelf() {
   const [courses, setCourses] = useState<CourseMeta[] | null>(null)
   const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
   const [showSettings, setShowSettings] = useState(false)
   const [showImport, setShowImport] = useState(false)
   const openGenerate = useGenerateStore((s) => s.openGenerate)
@@ -280,6 +281,14 @@ export default function Bookshelf() {
         {error && (
           <p className="mt-10 border border-cinnabar/40 bg-cinnabar/5 px-4 py-3 text-sm text-cinnabar-deep">
             内容清单加载失败：{error}
+          </p>
+        )}
+        {notice && (
+          <p className="mt-6 flex items-start gap-3 border border-ink/15 bg-paper-deep/50 px-4 py-2.5 text-sm text-ink-soft">
+            <span className="min-w-0 flex-1">{notice}</span>
+            <button className="shrink-0 text-ink-faint transition hover:text-cinnabar" onClick={() => setNotice('')} aria-label="关闭提示">
+              ✕
+            </button>
           </p>
         )}
         {!error && courses === null && <p className="mt-10 text-sm text-ink-faint">书卷整理中……</p>}
@@ -376,7 +385,15 @@ export default function Bookshelf() {
       </div>
 
       {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} />}
-      {showImport && <ImportDialog onClose={() => setShowImport(false)} onImported={refresh} />}
+      {showImport && (
+        <ImportDialog
+          onClose={() => setShowImport(false)}
+          onImported={(n) => {
+            if (n) setNotice(n)
+            refresh()
+          }}
+        />
+      )}
       {/* AI 著书对话框全局挂在 App；这里只触发打开 */}
       <GenerateBadge />
     </main>
