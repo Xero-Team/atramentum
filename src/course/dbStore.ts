@@ -4,6 +4,7 @@
  */
 import Dexie, { type Table } from 'dexie'
 import type { CourseMeta, CourseTree } from '../types/course'
+import type { Annotation, AskThread } from '../ask/types'
 import { buildTree } from './structure'
 import type { CourseStore } from './CourseStore'
 
@@ -31,6 +32,9 @@ export interface StoredFile {
 class MoxueDB extends Dexie {
   courses!: Table<StoredCourse, string>
   files!: Table<StoredFile, [string, string]>
+  /** 划词标注与问答会话：随课件持久化，可导出/导入（书籍类也可用） */
+  annotations!: Table<StoredAnnotation, string>
+  threads!: Table<StoredThread, string>
 
   constructor() {
     super('moxue')
@@ -38,8 +42,18 @@ class MoxueDB extends Dexie {
       courses: 'id, source, createdAt',
       files: '[courseId+path], courseId',
     })
+    // v2：只有新增表，courses/files 不动——升级时既有书架与课件原样保留
+    this.version(2).stores({
+      courses: 'id, source, createdAt',
+      files: '[courseId+path], courseId',
+      annotations: 'id, courseId, [courseId+path], path, createdAt',
+      threads: 'id, courseId, [courseId+path], nonce, createdAt',
+    })
   }
 }
+
+export type StoredAnnotation = Annotation
+export type StoredThread = AskThread
 
 export const db = new MoxueDB()
 
@@ -143,9 +157,12 @@ export async function loadCoursePlan(courseId: string): Promise<StoredPlan | und
 }
 
 export async function deleteCourse(id: string): Promise<void> {
-  await db.transaction('rw', db.courses, db.files, async () => {
+  await db.transaction('rw', db.courses, db.files, db.annotations, db.threads, async () => {
     await db.courses.delete(id)
     await db.files.where('courseId').equals(id).delete()
+    // 划词标注与问答随书一起消失，避免重新导入同名书时冒出上一本的笔记
+    await db.annotations.where('courseId').equals(id).delete()
+    await db.threads.where('courseId').equals(id).delete()
   })
   invalidateTree(id)
 }
@@ -163,8 +180,7 @@ export async function renameCourse(id: string, title: string): Promise<void> {
  *  只写 files 表的话清单停在 ['INDEX.md']，书会被误判成单文件课件——
  *  已写完的课时进不了目录，还会被「path 不在树内 → 跳第一节」重定向拽走，
  *  直到 finalize 全量覆盖才恢复。 */
-export async function updateCourseFile(courseId: string, path: string, text: string): Promise<CourseMeta | null> {
-  let fresh: CourseMeta | null = null
+export async function updateCourseFile(courseId: string, path: string, text: string): Promise<CourseMeta | null> {  let fresh: CourseMeta | null = null
   await db.transaction('rw', db.courses, db.files, async () => {
     await db.files.put({ courseId, path, text })
     const rec = await db.courses.get(courseId)
@@ -182,3 +198,75 @@ export async function updateCourseFile(courseId: string, path: string, text: str
   invalidateTree(courseId)
   return fresh
 }
+
+/* ───────── 划词标注 ───────── */
+
+/** 新建一条标注（划词高亮/下划线）；同 id 覆盖 */
+export async function saveAnnotation(a: Annotation): Promise<void> {
+  await db.annotations.put(a)
+}
+
+/** 改笔记 / 换样式；不存在则忽略 */
+export async function updateAnnotation(id: string, patch: Partial<Annotation>): Promise<void> {
+  const rec = await db.annotations.get(id)
+  if (!rec) return
+  await db.annotations.put({ ...rec, ...patch, id: rec.id, updatedAt: Date.now() })
+}
+
+export async function deleteAnnotation(id: string): Promise<void> {
+  await db.annotations.delete(id)
+}
+
+export async function getAnnotation(id: string): Promise<Annotation | undefined> {
+  return db.annotations.get(id)
+}
+
+/** 本书全部标注（按创建时间正序，便于列表展示） */
+export async function listAnnotations(courseId: string): Promise<Annotation[]> {
+  const rows = await db.annotations.where('courseId').equals(courseId).toArray()
+  return rows.sort((a, b) => a.createdAt - b.createdAt)
+}
+
+/** 某文件的标注（阅读器渲染只关心当前节） */
+export async function listAnnotationsForPath(courseId: string, path: string): Promise<Annotation[]> {
+  const rows = await db.annotations.where('[courseId+path]').equals([courseId, path]).toArray()
+  return rows.sort((a, b) => a.anchor.start - b.anchor.start)
+}
+
+/* ───────── 划词问答会话 ───────── */
+
+/** 写回一条会话（划词即写占位，回答完成后原地更新 → 实时可查看） */
+export async function saveThread(t: AskThread): Promise<void> {
+  await db.threads.put(t)
+}
+
+export async function deleteThread(id: string): Promise<void> {
+  await db.threads.delete(id)
+}
+
+/** 本书全部问答（按划词序号倒序 = 最近在上） */
+export async function listThreads(courseId: string): Promise<AskThread[]> {
+  const rows = await db.threads.where('courseId').equals(courseId).toArray()
+  return rows.sort((a, b) => b.createdAt - a.createdAt)
+}
+
+/** 读一条会话（历史列表点击时复现整段对话） */
+export async function getThread(id: string): Promise<AskThread | undefined> {
+  return db.threads.get(id)
+}
+
+/* ───────── 连带清理 ───────── */
+
+/** 导入标注包前清空本书旧标注（避免重复导入叠加两份） */
+export async function clearAnnotations(courseId: string): Promise<void> {
+  await db.annotations.where('courseId').equals(courseId).delete()
+}
+
+/** 供 io/bundle 使用：整批写入标注/问答（导入恢复） */
+export async function bulkPutNotes(annotations: Annotation[], threads: AskThread[]): Promise<void> {
+  await db.transaction('rw', db.annotations, db.threads, async () => {
+    if (annotations.length) await db.annotations.bulkPut(annotations)
+    if (threads.length) await db.threads.bulkPut(threads)
+  })
+}
+
