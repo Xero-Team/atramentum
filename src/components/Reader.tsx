@@ -13,10 +13,10 @@ import type { AskSeed } from '../ask/AskPanel'
 import { AnnotationCard } from '../ask/AnnotationCard'
 import { AskHistory } from '../ask/AskHistory'
 import { annotationAtPoint, clearMarks, highlightsSupported, paintMarks, scrollToAnnotation } from '../ask/marks'
-import { anchorFromSelection } from '../ask/offsets'
+import { anchorFromSelection, clearSelection } from '../ask/offsets'
 import { extractAskContext } from '../ask/context'
 import type { Annotation, AskThread } from '../ask/types'
-import { getThread, listAnnotationsForPath, saveAnnotation } from '../course/dbStore'
+import { deleteAnnotation, getThread, listAnnotationsForPath, saveAnnotation } from '../course/dbStore'
 import { SettingsDialog } from './SettingsDialog'
 import { exportCourseZip } from '../io/export'
 import { useCategoryStore } from '../store/categoryStore'
@@ -135,10 +135,19 @@ export default function Reader() {
   const [notesNonce, setNotesNonce] = useState(0)
   const [card, setCard] = useState<{ ann: Annotation; thread: AskThread | null; x: number; y: number } | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
+  // 刚标下的那一条：「撤销」只在几秒内有效，误触可回退
+  const [undoMark, setUndoMark] = useState<{ id: string; text: string } | null>(null)
   // 从历史抽屉定位到别的节时，等标注重画完成再滚过去
   const pendingFocusRef = useRef<string | null>(null)
   const { probe, clearProbe } = useSelectionProbe(mountRef, askAvailable)
   const reloadNotes = useCallback(() => setNotesNonce((n) => n + 1), [])
+
+  // 撤销提示自动消失
+  useEffect(() => {
+    if (!undoMark) return
+    const t = setTimeout(() => setUndoMark(null), 8000)
+    return () => clearTimeout(t)
+  }, [undoMark])
 
   /** 正文容器（mountMarkdown 挂载的 .prose / .book-text 根）；标注与划词上下文都基于它 */
   const getProseRoot = useCallback(() => {
@@ -184,6 +193,10 @@ export default function Reader() {
     const host = getProseRoot()
     if (!host) return
     const anchor = anchorFromSelection(host, text)
+    // sectionTitle 也要从当前选区推（extractAskContext 读 window.getSelection），必须在收起前取
+    const sectionTitle = extractAskContext(host, text).sectionTitle
+    // 锚点已拿到，立刻收起选区：留着的话朱红选区会盖住标注，看着像撤不掉的状态
+    clearSelection()
     if (!anchor) {
       setExportMsg('这段文字跨了多个区块，暂时无法标注——缩短选区再试')
       setTimeout(() => setExportMsg(''), 4000)
@@ -194,7 +207,7 @@ export default function Reader() {
       id: `${meta.id}:a:${now}`,
       courseId: meta.id,
       path: currentPath,
-      sectionTitle: extractAskContext(host, text).sectionTitle,
+      sectionTitle,
       anchor,
       style: 'highlight',
       note: '',
@@ -205,11 +218,27 @@ export default function Reader() {
       await saveAnnotation(ann)
       reloadNotes()
       setCard({ ann, thread: null, x: spot.x, y: spot.y })
+      setUndoMark({ id: ann.id, text: ann.anchor.text })
     } catch (e) {
       setExportMsg(`标注失败：${(e as Error).message}`)
       setTimeout(() => setExportMsg(''), 4000)
     }
   }, [probe, clearProbe, meta, currentPath, getProseRoot, reloadNotes])
+
+  /** 撤销刚标下的那一条（误触可回退） */
+  const undoLastMark = useCallback(async () => {
+    const target = undoMark
+    setUndoMark(null)
+    if (!target) return
+    setCard((c) => (c?.ann.id === target.id ? null : c))
+    try {
+      await deleteAnnotation(target.id)
+      reloadNotes()
+    } catch (e) {
+      setExportMsg(`撤销失败：${(e as Error).message}`)
+      setTimeout(() => setExportMsg(''), 4000)
+    }
+  }, [undoMark, reloadNotes])
 
   /** 点正文里的高亮/下划线 → 开标注卡（带出关联的问答） */
   const openCard = useCallback(async (ann: Annotation, x: number, y: number) => {
@@ -718,6 +747,28 @@ export default function Reader() {
         onOpenAnnotation={(a) => void openAnnotationFromPanel(a)}
         onJumpToPath={goTo}
       />
+
+      {/* 刚标下的那一条：给几秒钟反悔的机会（浏览器选区已收起，不会再有撤不掉的划词状态） */}
+      {undoMark && (
+        <div className="fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 border border-ink/20 bg-paper px-3.5 py-2 text-xs text-ink-soft shadow-paper">
+          <span className="max-w-64 truncate">
+            已标注「<span className="font-song text-ink">{undoMark.text}</span>」
+          </span>
+          <button
+            className="shrink-0 border border-ink/20 px-2 py-0.5 text-ink-soft transition hover:border-cinnabar/60 hover:text-cinnabar-deep"
+            onClick={() => void undoLastMark()}
+          >
+            撤销
+          </button>
+          <button
+            className="shrink-0 text-ink-faint transition hover:text-cinnabar"
+            onClick={() => setUndoMark(null)}
+            aria-label="关闭提示"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {probe && <FloatingToolbar x={probe.x} y={probe.y} onAsk={handleAsk} onMark={() => void handleMark()} />}
       {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} />}

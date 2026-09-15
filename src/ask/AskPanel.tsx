@@ -9,7 +9,7 @@ import type { AgentStep, CourseFiles, FlowItem } from './agent'
 import type { AskContext } from './context'
 import { extractAskContext } from './context'
 import type { AskThread } from './types'
-import { anchorFromSelection, resolveAnchor } from './offsets'
+import { anchorFromSelection, clearSelection, resolveAnchor } from './offsets'
 import { answerHTML } from './render'
 import { getAnnotation, getThread, saveAnnotation, saveThread, updateAnnotation } from '../course/dbStore'
 import { storeFor } from '../course'
@@ -480,6 +480,9 @@ export function AskPanel({
     const host = getProseRoot() ?? document.body
     const threadId = `${courseId}:t:${seed.nonce}`
     void (async () => {
+      // 没配 AI 就一个字节都不会发出去——此时不该在正文里留下任何痕迹
+      const cfg = useSettingsStore.getState().ai
+      if (!cfg.apiKey || !cfg.model) return
       let ctx: AskContext
       if (seed.annotationId) {
         // 从已有标注进入（该标注还没有问答）：按锚点还原选区，重新取上下文
@@ -509,6 +512,8 @@ export function AskPanel({
           }).catch(() => undefined)
         }
       }
+      // 上下文与锚点都取完了，收起选区——留着的话浏览器选区会一直盖在标注上
+      clearSelection()
       selectionRef.current = ctx.selection
       ctxRef.current = { sectionTitle: ctx.sectionTitle, before: ctx.before, after: ctx.after }
       threadIdRef.current = threadId

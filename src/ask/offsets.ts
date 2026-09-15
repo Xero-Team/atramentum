@@ -109,7 +109,15 @@ export interface ResolvedAnchor {
 }
 
 /**
- * 锚点 → Range：先按偏移取，取到的文本与原文不符（正文已被改写）则按原文重新搜索，
+ * 收起当前选区。划词操作（问 / 标）拿到锚点后必须调它：
+ * 浏览器选区是朱红底白字的不透明块，会一直盖在标注上——看着像「划词状态撤不掉」，
+ * 也让高亮与下划线的差别整个看不出来（切了样式却像被锁死）。
+ */
+export function clearSelection(): void {
+  window.getSelection()?.removeAllRanges()
+}
+
+/** 锚点 → Range：先按偏移取，取到的文本与原文不符（正文已被改写）则按原文重新搜索，
  * 仍找不到返回 null（该标注在当前版本正文里已不存在）。
  */
 export function resolveAnchor(root: Node, anchor: AnnotationAnchor): ResolvedAnchor | null {
