@@ -26,21 +26,24 @@
 - **📚 Bookshelf** — Your courses and books, grouped by categories you create. Drag cards between categories to organize; ink-seal style covers with a custom drag ghost.
 - **📖 Reader** — A three-pane reading view: TOC tree on the left, typography-focused prose in the middle (code highlighting, ASCII diagrams as monolith blocks), and an AI panel on the right. Markdown relative links navigate inside the app.
 - **🤖 Ask AI (agent mode)** — Select any text and tap the floating 「问」 seal, or ask freely: the AI gets read-only tools to browse / search / read the current course and answers with a visible step-by-step workflow timeline.
+- **🖍️ Highlights & notes** — Selecting text also lets you mark it (highlight or underline) and attach your own note. Marks are anchored by character offset + original text, so they survive AI rewrites; click one to revisit the question you asked and the note you wrote.
+- **🕘 Saved Q&A history** — Every conversation is stored with the book. Reopen any past thread from the 历史 drawer — it replays from local records, so browsing costs no API calls — then keep asking, or delete it.
 - **✍️ Rewrite section** — Let AI rewrite the current section; review the streaming result and only apply it when satisfied.
 - **🖋️ AI writing (AI 著书)** — Give a topic, get a lesson plan (discuss & revise it with AI first), then lessons are streamed one by one into a complete book. Continue an unfinished book, or rewrite an entire book against your own requirements.
 - **🎨 Style skills** — Distill a reusable "writing style spec" from an existing course (voice, structure, diagram habits), inject it into generation so new books sound the same. A default style is built in.
-- **📥 Import / 📤 Export** — zip / tar.gz / rar archives, folders, PDFs (page text) and EPUBs (chaptered). Export any course back as a zip. Keys never leak into exports.
+- **📥 Import / 📤 Export** — zip / tar.gz / rar archives, folders, PDFs (page text) and EPUBs (chaptered). Export any course back as a zip, highlights and Q&A included (`moxue-notes.json`); re-import it and your notes land back on the book. Keys never leak into exports.
 
 ### Privacy & data
 
 | Data | Stored in | Leaves your browser? |
 |------|-----------|----------------------|
 | Imported courses & books | IndexedDB | No |
+| Highlights, notes & Q&A history | IndexedDB | No (unless you export) |
 | Categories & skills | localStorage | No |
 | AI endpoint & API key | localStorage | No |
 | Built-in guide | Site static assets | Ships with the site |
 
-The AI client connects **directly from your browser** to the endpoint you configure (OpenAI-compatible or Anthropic BYOK). There is no backend that could see your keys or content. To move to another device, export your content as zip and re-import.
+The AI client connects **directly from your browser** to the endpoint you configure (OpenAI-compatible or Anthropic BYOK). There is no backend that could see your keys or content. Highlights, notes and Q&A travel with a book: export it as a zip and re-import on another device.
 
 ### Quick start
 
@@ -81,21 +84,24 @@ Licensed under the [Apache License 2.0](LICENSE).
 - **📚 书架**——课件与书籍按你自建的分类陈列，卡片拖拽归档，墨色印章封面与自定义拖影。
 - **📖 阅读器**——三栏阅读视图：左侧目录树、中间排印正文（代码高亮、ASCII 碑刻图等宽呈现）、右侧 AI 面板；Markdown 相对链接在应用内跳转。
 - **🤖 问 AI（Agent 模式）**——划词点浮出的「问」印，或自由提问：AI 拿到三只只读工具（浏览 / 检索 / 读文件），自主翻阅当前课件作答，全过程以「工作流程」时间线展示。
+- **🖍️ 划词标注与笔记**——划词还能只上墨：高亮或下划线，随附你自己的批注。标注以「字符偏移 + 原文」定位，AI 改写正文后照样对得上；点一下即可回看当时问过什么、写了什么。
+- **🕘 问答历史**——每轮问答都跟着书存下来。历史抽屉里点开任意一段即可就地复现（读本地记录，浏览不消耗 API），可继续追问，也可删除。
 - **✍️ 改写本节**——让 AI 重写当前小节，流式预览、满意才应用写回。
 - **🖋️ AI 著书**——给一个主题先出课时规划（可和 AI 商量修改），确认后逐课时流式成书；支持续写未完的书，或按你的要求整书改写。
 - **🎨 风格 skill**——从现有课件提炼可复用的「写作风格规范」（文风、骨架、图示习惯），注入生成让新书延续同样风格；内置默认风格开箱即用。
-- **📥 导入 / 📤 导出**——zip / tar.gz / rar 压缩包、文件夹、PDF（逐页文本）、EPUB（按章）；任何课件可导出回 zip。密钥永不进导出文件。
+- **📥 导入 / 📤 导出**——zip / tar.gz / rar 压缩包、文件夹、PDF（逐页文本）、EPUB（按章）；任何课件可导出回 zip，划词标注与问答一并带走（`moxue-notes.json`），重新导入即回到书上。密钥永不进导出文件。
 
 ### 隐私与数据
 
 | 数据 | 存放位置 | 会离开浏览器吗 |
 |------|----------|----------------|
 | 导入的课件与书籍 | IndexedDB | 否 |
+| 划词标注、笔记与问答历史 | IndexedDB | 否（除非你自己导出） |
 | 分类与风格 skill | localStorage | 否 |
 | AI 端点与密钥 | localStorage | 否 |
 | 内置指南 | 站点静态资源 | 随站点携带 |
 
-AI 客户端**从你的浏览器直连**你配置的端点（OpenAI 兼容 / Anthropic BYOK），没有任何可以窥探密钥或内容的服务端。换设备时把内容导出为 zip 再导入即可。
+AI 客户端**从你的浏览器直连**你配置的端点（OpenAI 兼容 / Anthropic BYOK），没有任何可以窥探密钥或内容的服务端。换设备时把书导出为 zip 再导入，标注与问答跟着一起走。
 
 ### 快速上手
 
