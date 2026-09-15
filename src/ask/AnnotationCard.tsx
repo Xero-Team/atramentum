@@ -2,13 +2,32 @@
  * 标注卡：点正文里的高亮/下划线弹出。
  * 一处看全：划选原文、所在节、与 AI 的问答、自己的笔记；可换样式（高亮↔下划线）、删标注。
  * 笔记落库即生效，随书导出/导入。
+ *
+ * 位置：先按点击点摆一版，挂载后拿实际高度校正——下方放不下就翻到选区上方，
+ * 保证笔记框始终在视口内；顶部标题栏可拖动，被正文遮住时随手挪开。
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import type { PointerEvent as ReactPointerEvent } from 'react'
 import type { Annotation, AskThread, NoteMarkStyle } from './types'
 import { deleteAnnotation, updateAnnotation } from '../course/dbStore'
 import { answerHTML } from './render'
 
 const CARD_W = 340
+const GAP = 12
+const EDGE = 8
+
+interface Pos {
+  left: number
+  top: number
+}
+
+/** 把卡片按视口边界夹住（拖动时用；尺寸取实际渲染值） */
+function clampPos(left: number, top: number, w: number, h: number): Pos {
+  return {
+    left: Math.max(EDGE, Math.min(left, window.innerWidth - w - EDGE)),
+    top: Math.max(EDGE, Math.min(top, window.innerHeight - h - EDGE)),
+  }
+}
 
 export function AnnotationCard({
   annotation,
@@ -35,6 +54,10 @@ export function AnnotationCard({
   const [saved, setSaved] = useState(false)
   const [err, setErr] = useState('')
   const boxRef = useRef<HTMLDivElement>(null)
+  // 摆位：pos 为 null 时先按估算位置渲染一帧，挂载后立刻用真实尺寸校正
+  const [pos, setPos] = useState<Pos | null>(null)
+  // 用户拖过的那条标注不再自动摆位（拖着拖着被拽回去最恼人）
+  const draggedForRef = useRef<string | null>(null)
   // 草稿与「已知落库的值」：点别处关卡片时组件会先卸载（blur 根本来不及触发），
   // 必须在关/卸载前主动补存，否则用户写的笔记会被静默丢掉
   const noteRef = useRef(note)
@@ -49,6 +72,47 @@ export function AnnotationCard({
     setSaved(false)
     setErr('')
   }, [annotation.id, annotation.note])
+
+  // 按真实高度摆位：下方放不下就翻到选区上方，两侧居中但不越界
+  useLayoutEffect(() => {
+    if (draggedForRef.current === annotation.id) return
+    const el = boxRef.current
+    const w = el?.offsetWidth || CARD_W
+    const h = el?.offsetHeight || 0
+    const left = Math.max(EDGE, Math.min(x - w / 2, window.innerWidth - w - EDGE))
+    // 默认挂在点击处下方；下沿越界就翻到上方，再不行就贴边（卡片 max-h 由视口兜底）
+    let top = y + GAP
+    if (h && top + h > window.innerHeight - EDGE) top = y - h - GAP
+    setPos(clampPos(left, top, w, h))
+  }, [annotation.id, x, y])
+
+  /* ── 拖动：抓住标题栏挪（视口内，松手不回弹） ── */
+  const dragRef = useRef<{ startX: number; startY: number; from: Pos } | null>(null)
+
+  const onDragStart = (e: ReactPointerEvent<HTMLDivElement>) => {
+    // 标题栏上的按钮（关闭）不参与拖动
+    if ((e.target as HTMLElement).closest('button')) return
+    const el = boxRef.current
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    dragRef.current = { startX: e.clientX, startY: e.clientY, from: { left: rect.left, top: rect.top } }
+    setPos({ left: rect.left, top: rect.top })
+    draggedForRef.current = annotation.id
+    e.currentTarget.setPointerCapture(e.pointerId)
+    e.preventDefault() // 别把标题文字选起来
+  }
+
+  const onDragMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const d = dragRef.current
+    const el = boxRef.current
+    if (!d || !el) return
+    setPos(clampPos(d.from.left + (e.clientX - d.startX), d.from.top + (e.clientY - d.startY), el.offsetWidth, el.offsetHeight))
+  }
+
+  const onDragEnd = (e: ReactPointerEvent<HTMLDivElement>) => {
+    dragRef.current = null
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId)
+  }
 
   /** 把没落库的草稿补存；重复调用无副作用 */
   const flushNote = useCallback(
@@ -85,8 +149,9 @@ export function AnnotationCard({
     return () => document.removeEventListener('mousedown', onDown)
   }, [onClose, flushNote])
 
-  const left = Math.max(8, Math.min(x - CARD_W / 2, window.innerWidth - CARD_W - 8))
-  const top = Math.max(8, Math.min(y + 12, window.innerHeight - 80))
+  // 首帧还没有实测位置：先按点击点粗放一版，避免闪一下左上角
+  const left = pos?.left ?? Math.max(EDGE, Math.min(x - CARD_W / 2, window.innerWidth - CARD_W - EDGE))
+  const top = pos?.top ?? Math.max(EDGE, Math.min(y + GAP, window.innerHeight - 80))
 
   const firstAnswer = useMemo(() => {
     const a = thread?.turns.find((t) => t.role === 'assistant' && t.content)
@@ -112,12 +177,23 @@ export function AnnotationCard({
   return (
     <div
       ref={boxRef}
-      className="fixed z-40 border border-ink/20 bg-paper shadow-paper"
+      className="fixed z-40 flex max-h-[calc(100vh-16px)] flex-col border border-ink/20 bg-paper shadow-paper"
       style={{ left, top, width: CARD_W }}
       role="dialog"
       aria-label="划词标注"
     >
-      <div className="flex items-start gap-2 border-b border-ink/10 px-3 py-2">
+      {/* 标题栏兼拖动柄：正文压住卡片时拖走即可（触屏下 touch-none 免得变成滚动） */}
+      <div
+        className="flex shrink-0 cursor-move touch-none select-none items-start gap-2 border-b border-ink/10 px-3 py-2 active:cursor-grabbing"
+        onPointerDown={onDragStart}
+        onPointerMove={onDragMove}
+        onPointerUp={onDragEnd}
+        onPointerCancel={onDragEnd}
+        title="按住可拖动"
+      >
+        <span className="mt-0.5 shrink-0 text-[11px] leading-4 text-ink-faint" aria-hidden>
+          ⠿
+        </span>
         <div className="min-w-0 flex-1">
           <p className="text-[11px] tracking-[0.2em] text-ink-faint">划 词 标 注</p>
           {annotation.sectionTitle && <p className="mt-0.5 truncate text-xs text-ink-faint">{annotation.sectionTitle}</p>}
@@ -127,7 +203,7 @@ export function AnnotationCard({
         </button>
       </div>
 
-      <div className="max-h-[52vh] space-y-3 overflow-y-auto px-3 py-3">
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3">
         <p className="border-l-2 border-cinnabar/60 bg-ink/[0.03] px-2.5 py-1.5 font-song text-[13px] leading-6 text-ink">
           {annotation.anchor.text}
         </p>
