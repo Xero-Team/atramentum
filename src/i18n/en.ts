@@ -340,6 +340,54 @@ export const en: Dict = {
     undo: 'Undo',
   },
 
+  importDlg: {
+    title: 'Import',
+    close: 'Close',
+    nameLabel: 'Title (guessed from the file name; editable)',
+    namePlaceholder: 'Leave empty to use the file or folder name',
+    categoryLabel: 'File under (you can move it later with the category dropdown on its card)',
+    dropTitle: 'Drop files here · or click to choose',
+    dropLines: [
+      'Courses: an archive of the whole course (zip / tar.gz / rar), or a course folder.',
+      'Books: PDF / EPUB (split into chapters automatically; read-only, but you can still highlight and ask).',
+      '“Choose folder” usually does not work on phones — use a zip archive there instead.',
+    ],
+    pickFiles: 'Choose files',
+    pickDir: 'Choose folder',
+    busy: 'Importing…',
+    limits:
+      'Courses import text files only (md / code / config), 2MB each at most; books are stored as extracted text (no images). Everything stays in this browser (IndexedDB) and is never uploaded automatically.',
+    notesPrefix: 'If the archive contains an exported ',
+    notesSuffix: ' (highlights and Q&A), it is restored onto this book once the import finishes.',
+    wrongFileType:
+      'Choose a zip / tar.gz / rar archive or a PDF / EPUB book; for a course folder use “Choose folder”.',
+    restored: (annotations: number, threads: number) =>
+      `Restored ${annotations} highlight${annotations === 1 ? '' : 's'} and ${threads} conversation${threads === 1 ? '' : 's'} onto this book.`,
+    restoreFailed: (msg: string) => `The course imported, but restoring its highlights failed: ${msg}`,
+  },
+
+  io: {
+    rarLoadFailed: 'Could not load the rar component. Try again, or unzip the archive and drop the folder in / use zip instead.',
+    rarEncrypted: 'That archive is encrypted — decrypt it before importing.',
+    rarFailed: (detail: string) => `Could not read the rar archive: ${detail}. Try zip, or drop in an already-extracted folder.`,
+    noFiles: 'No usable course files (text files only, 2MB each at most)',
+    untitled: 'Untitled course',
+    untitledPdf: 'Untitled PDF',
+    importedDesc: (n: number) => `Imported · ${n} file${n === 1 ? '' : 's'}`,
+    epubDesc: (n: number) => `EPUB · ${n} chapter${n === 1 ? '' : 's'}`,
+    pdfDesc: (n: number) => `PDF · ${n} page${n === 1 ? '' : 's'}`,
+    page: (n: number) => `Page ${n}`,
+    chapterColumns: '| # | Chapter |',
+    exportEmpty: 'This course has no files to export',
+    exportShare: 'Export course',
+    epubUnpack: 'Could not unpack the EPUB — the file may be damaged.',
+    epubNoContainer: 'Not a valid EPUB: container.xml is missing',
+    epubNoOpf: 'Malformed EPUB: the OPF manifest could not be found',
+    epubNoOpfFile: 'Malformed EPUB: the OPF file is missing',
+    epubNoText: 'No text chapters could be parsed out of this EPUB (it may be nothing but scanned images)',
+    epubUntitledSection: (n: number) => `Section ${n}`,
+  },
+
   ask: {
     title: 'Ask AI',
     history: 'History',

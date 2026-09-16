@@ -337,6 +337,57 @@ export const zh = {
     undo: '撤销',
   },
 
+  /** The import dialog. */
+  importDlg: {
+    title: '导入',
+    close: '关闭',
+    nameLabel: '书名（自动从文件名推断，可修改）',
+    namePlaceholder: '留空则用文件 / 文件夹名',
+    categoryLabel: '归入分类（可稍后在书架用卡片上的分类下拉调整）',
+    dropTitle: '拖入文件 · 或点击选择',
+    /** One entry per line; rendered with <br> between them */
+    dropLines: [
+      '课件：整门课的压缩包（zip / tar.gz / rar）或课件文件夹。',
+      '书籍：PDF / EPUB（自动按章节分页，纯阅读，同样可划词标注）。',
+      '手机上「选择文件夹」多半不可用，请改用 zip 压缩包。',
+    ],
+    pickFiles: '选择文件',
+    pickDir: '选择文件夹',
+    busy: '解析入库中……',
+    limits: '课件仅导入文本类文件（md / 代码 / 配置），单个不超过 2MB；书籍抽取文本后入库（不含图片）。全部保存在浏览器本地（IndexedDB），不会自动上传。',
+    /** Wraps the literal file name `moxue-notes.json`, which keeps its code styling */
+    notesPrefix: '若压缩包里有导出的 ',
+    notesSuffix: '（划词标注与问答），会在入库后一并复原到这本书上。',
+    wrongFileType: '请选择 zip / tar.gz / rar 压缩包或 PDF / EPUB 书籍，课件文件夹请用「选择文件夹」。',
+    restored: (annotations: number, threads: number) =>
+      `已随书恢复 ${annotations} 条划词标注、${threads} 段问答。`,
+    restoreFailed: (msg: string) => `课件已导入，但标注恢复失败：${msg}`,
+  },
+
+  /** Messages from the import/export layer that reach the user. */
+  io: {
+    rarLoadFailed: 'rar 解析组件加载失败，请重试，或将压缩包解压后拖入文件夹 / 改用 zip。',
+    rarEncrypted: '该压缩包已加密，请先解密后再导入。',
+    rarFailed: (detail: string) => `rar 解析失败：${detail}。可改用 zip 或拖入已解压的文件夹。`,
+    noFiles: '没有可用的课件文件（仅支持文本类文件，单个不超过 2MB）',
+    untitled: '未命名课件',
+    untitledPdf: '未命名 PDF',
+    importedDesc: (n: number) => `导入课件 · ${n} 个文件`,
+    epubDesc: (n: number) => `EPUB · ${n} 章`,
+    pdfDesc: (n: number) => `PDF · ${n} 页`,
+    page: (n: number) => `第 ${n} 页`,
+    chapterColumns: '| # | 章节 |',
+    exportEmpty: '课件内没有可导出的文件',
+    /** Title of the native share sheet when exporting inside the Android shell */
+    exportShare: '导出课件',
+    epubUnpack: 'EPUB 解包失败：文件可能已损坏。',
+    epubNoContainer: '不是有效的 EPUB：缺少 container.xml',
+    epubNoOpf: 'EPUB 结构异常：找不到 OPF 清单',
+    epubNoOpfFile: 'EPUB 结构异常：OPF 文件缺失',
+    epubNoText: 'EPUB 内未解析出文本章节（可能全是图片版扫描页）',
+    epubUntitledSection: (n: number) => `第 ${n} 节`,
+  },
+
   /**
    * The AI panel. `payload` and `system` are prompts rather than UI copy, but
    * they are translated too: a Chinese system prompt makes the model answer in
