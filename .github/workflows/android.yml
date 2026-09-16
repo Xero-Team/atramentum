@@ -47,13 +47,18 @@ jobs:
           echo "--- 已装组件 ---"
           sdkmanager --list_installed | sed -n '1,25p'
 
-      # 签名密钥的缓存很关键：AGP 在缺少 ~/.android/debug.keystore 时会现生成一把，
-      # 而 GitHub 的 runner 每次都是干净的——不缓存的话每次构建签名都不一样，
-      # 用户就没法覆盖安装（Android 拒绝签名不一致的更新，只能先卸载、数据一起没）。
+      # 签名密钥的缓存很关键：AGP 在缺少 debug.keystore 时会现生成一把，而 GitHub
+      # 的 runner 每次都是干净的——不缓存的话每次构建签名都不一样，用户就没法覆盖
+      # 安装（Android 拒绝签名不一致的更新，只能先卸载，本地数据一起没）。
+      #
+      # 路径按 AGP 8 实际落盘的位置（实测出来的，别照抄网上的 ~/.android/）：
+      # Android 的用户目录走了 XDG 约定，即 ~/.config/.android/。
+      # 万一以后又变，「检查签名与产物」那步会把 apksigner 的证书指纹打出来，
+      # 指纹在两次构建间对不上就说明这儿又失效了。
       - name: 缓存 debug keystore（保证各次构建签名一致）
         uses: actions/cache@v4
         with:
-          path: ~/.android/debug.keystore
+          path: ~/.config/.android/debug.keystore
           key: android-debug-keystore-v1
 
       - name: 缓存 Gradle
@@ -113,14 +118,10 @@ jobs:
           "${BT}apksigner" verify --print-certs "$APK"
           "${BT}aapt2" dump badging "$APK" | grep -E "^package|^application-label:|^sdkVersion|^native-code" || true
 
-          # AGP 生成的 debug keystore 到底落在哪：缓存它才能让每次构建签名一致，
-          # 而 ~/.android/debug.keystore 实测不存在，得先找出来
-          echo "--- 定位 debug keystore ---"
-          echo "HOME=$HOME"
-          echo "ANDROID_USER_HOME=${ANDROID_USER_HOME:-<unset>}  ANDROID_SDK_HOME=${ANDROID_SDK_HOME:-<unset>}"
-          echo "user.home=$(java -XshowSettings:properties -version 2>&1 | grep 'user.home' | head -1)"
-          ls -la "$HOME/.android" 2>&1 | head -5
-          find "$HOME" /usr/local/lib/android /root -maxdepth 5 -name '*.keystore' 2>/dev/null | head -10
+          # 指纹是签名一致性的唯一判据：连续两次构建对不上，就说明上面那个
+          # keystore 缓存又失效了（AGP 换落盘位置时会这样）。顺手把实际路径打出来。
+          echo "--- debug keystore 实际落点 ---"
+          find "$HOME" -maxdepth 5 -name '*.keystore' 2>/dev/null | head -5
 
       # 稳定的文件名，Release 的下载地址才不会每次都变
       - name: 准备发布产物
