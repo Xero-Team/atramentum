@@ -1,14 +1,16 @@
 name: Android APK
 
-# 出 APK 比网页部署重得多（首次要下 Gradle 与 Android 依赖），所以：
-# - push main 自动出一版，方便随时取最新包
-# - 打 tag（v*）也出一版，便于对应版本
-# - 也可以在 Actions 页面手动触发
+# push main 自动出一版并发到 Release（下载地址固定，比翻 Actions 产物顺手）；
+# 也可以在 Actions 页面手动触发。
 on:
   push:
     branches: [main]
     tags: ['v*']
   workflow_dispatch:
+
+# 发 Release 需要写权限
+permissions:
+  contents: write
 
 jobs:
   apk:
@@ -44,6 +46,15 @@ jobs:
           sdkmanager "build-tools;36.0.0" || echo "build-tools;36.0.0 未装，交给 Gradle 处理"
           echo "--- 已装组件 ---"
           sdkmanager --list_installed | sed -n '1,25p'
+
+      # 签名密钥的缓存很关键：AGP 在缺少 ~/.android/debug.keystore 时会现生成一把，
+      # 而 GitHub 的 runner 每次都是干净的——不缓存的话每次构建签名都不一样，
+      # 用户就没法覆盖安装（Android 拒绝签名不一致的更新，只能先卸载、数据一起没）。
+      - name: 缓存 debug keystore（保证各次构建签名一致）
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: android-debug-keystore-v1
 
       - name: 缓存 Gradle
         uses: actions/cache@v4
@@ -85,26 +96,52 @@ jobs:
           sed -i 's#<item name="android:background">@drawable/splash</item>#&\n        <item name="windowSplashScreenBackground">@color/moxue_splash_background</item>#' "$STYLES"
           grep -q 'windowSplashScreenBackground' "$STYLES" || { echo "::error::启动画面补丁没打上"; exit 1; }
 
-          echo "--- 关键资源确认 ---"
-          ls $RES/mipmap-anydpi-v26/
-          ls $RES/drawable/ | head
-          grep -c moxue_ $RES/values/moxue_colors.xml
-
       - name: 构建 debug APK
         working-directory: android
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon --stacktrace
 
-      - name: 收集产物信息
+      # 打印签名证书指纹：换过密钥这里会变，而密钥一变用户就没法覆盖安装。
+      # 出安装问题时第一眼看这里。
+      - name: 检查签名与产物
         working-directory: android
         run: |
-          ls -lh app/build/outputs/apk/debug/
-          ls -lh app/build/outputs/apk/debug/*.apk
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          ls -lh "$APK"
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/*/ | tail -1)
+          "${BT}apksigner" verify --print-certs "$APK"
+          "${BT}aapt2" dump badging "$APK" | grep -E "^package|^application-label|^sdkVersion|^native-code" || true
+
+      # 稳定的文件名，Release 的下载地址才不会每次都变
+      - name: 准备发布产物
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk moxue-android.apk
 
       - uses: actions/upload-artifact@v4
         with:
           name: moxue-debug-apk
-          path: android/app/build/outputs/apk/debug/*.apk
+          path: moxue-android.apk
           if-no-files-found: error
           retention-days: 30
+
+      # 每次构建更新同一个 Release（tag 固定为 android-latest），下载地址恒定：
+      # https://github.com/Xero-Team/atramentum/releases/latest/download/moxue-android.apk
+      # 同名附件会被替换，不会越堆越多。
+      - name: 发布到 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-latest
+          name: 墨痕 Android · 滚动构建
+          body: |
+            每次 `main` 构建自动更新到这里，直接下载安装即可。
+
+            这是 **debug 签名**的包——自己装、发给朋友都没问题；上架 Google Play
+            需要自备 release keystore（放仓库 secrets）。
+
+            覆盖安装失败（提示「应用未安装」）通常意味着签名变了，先卸载旧的再装
+            （会清掉本地数据，重要内容记得先在应用内「导出 zip」）。
+
+            - 提交：`${{ github.sha }}`
+            - 构建序号：`${{ github.run_number }}`
+          files: moxue-android.apk
+          fail_on_unmatched_files: true
