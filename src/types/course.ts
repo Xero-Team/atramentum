@@ -1,4 +1,6 @@
 // Course types: source, metadata, tree
+import type { Lang } from '../i18n/detect'
+
 export type CourseSource = 'builtin' | 'imported' | 'generated'
 export type CourseKind = 'dir' | 'single'
 /** Content format: md courses (with AI features); epub/pdf books (reading only, no selection) */
@@ -18,6 +20,12 @@ export interface CourseMeta {
   format: CourseFormat
   /** Every file path in the course, relative (built-ins from the manifest; imports and generated courses from the stored list) */
   files: string[]
+  /**
+   * For built-in courses that exist in more than one language, which one this
+   * is. The shelf shows only the ones matching the interface language; anything
+   * without a lang (every imported, generated and user course) always shows.
+   */
+  lang?: Lang
 }
 
 /** The AI-feature switch, on for md courses only; always false for books */

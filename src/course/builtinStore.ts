@@ -26,6 +26,10 @@ async function fetchManifest(): Promise<CourseMeta[]> {
     category: c.category ?? '学习',
     format: c.format ?? 'md',
     source: 'builtin' as const,
+    // The shelf hides a built-in course whose lang is not the current one, so a
+    // typo in the manifest would make it vanish silently. Only the two known
+    // languages are honoured; anything else means "show it in every language".
+    lang: c.lang === 'zh' || c.lang === 'en' ? c.lang : undefined,
   }))
 }
 

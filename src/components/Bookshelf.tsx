@@ -232,7 +232,7 @@ function CourseCard({
 }
 
 export default function Bookshelf() {
-  const { t } = useI18n()
+  const { lang, t } = useI18n()
   const [courses, setCourses] = useState<CourseMeta[] | null>(null)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -263,7 +263,14 @@ export default function Bookshelf() {
   // A book finished (or was continued) in the background → refresh the shelf live
   useEffect(() => onCourseCreated(() => refresh()), [refresh])
 
-  const groups = useMemo(() => groupCourses(courses ?? [], assign, order), [courses, assign, order])
+  // A built-in course marked with a lang only belongs to that interface language,
+  // so the guide swaps over when the language does. Everything else (imported,
+  // generated, anything you wrote) has no lang and always shows.
+  const visible = useMemo(
+    () => (courses ?? []).filter((c) => !c.lang || c.lang === lang),
+    [courses, lang],
+  )
+  const groups = useMemo(() => groupCourses(visible, assign, order), [visible, assign, order])
 
   const commitNewCategory = () => {
     if (newName.trim()) addCategory(newName)

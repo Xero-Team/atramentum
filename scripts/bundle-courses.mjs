@@ -8,9 +8,13 @@ import { join, relative, sep } from 'node:path'
 const SOURCE_ROOT = join(process.cwd(), 'src', 'builtin')
 const OUT_PATH = join(process.cwd(), 'public', 'courses')
 
-// 参与打包的内置课件（含各自的 INDEX.md）
+// Courses bundled with the site (each with its own INDEX.md).
+// `lang` marks a course as belonging to one interface language: the shelf shows
+// only the ones matching the current language, so the guide swaps over with it.
+// Leave it off for content that reads the same either way.
 const FOLDER_COURSES = [
-  { id: 'guide', title: '墨痕使用指南', seal: '引', desc: '功能导览：书架、阅读、问 AI、AI 著书与导入导出', category: '入门' },
+  { id: 'guide', title: '墨痕使用指南', seal: '引', desc: '功能导览：书架、阅读、问 AI、AI 著书与导入导出', category: '入门', lang: 'zh' },
+  { id: 'guide-en', title: 'Atramentum User Guide', seal: 'G', desc: 'A tour of the features: shelf, reading, Ask AI, Write with AI, import and export', category: '入门', lang: 'en' },
 ]
 
 // 只拷贝文本扩展名；排除二进制 / 元数据以控制部署体积
