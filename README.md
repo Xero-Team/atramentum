@@ -34,6 +34,7 @@
 - **📥 Import / 📤 Export** — zip / tar.gz / rar archives, folders, PDFs (page text) and EPUBs (chaptered). Export any course back as a zip, highlights and Q&A included (`moxue-notes.json`); re-import it and your notes land back on the book. Keys never leak into exports.
 - **🌓 Light / dark** — A second palette in the same ink idiom: night-ink ground, rice-paper white text, and 青 (cyan) taking the accent role from cinnabar. Flip it from the ☾ / ☀ in the title bar, or pick light / dark / follow-system under Settings.
 - **📱 Phones & tablets** — Responsive throughout: on narrow screens the table of contents becomes a slide-in drawer, header actions collapse into a ⋯ menu and the AI panel goes full-screen. Card actions that used to be hover-only are now always reachable by touch, with a category dropdown standing in for drag-and-drop.
+- **📲 Installable (PWA)** — Add it to your home screen and it opens full-screen like an app, with no address bar. The app shell is precached, so books you have already opened stay readable with the network off; asking AI obviously still needs a connection. Updates are offered rather than forced — the reload prompt waits until you tap it, and stays quiet while a book is being generated.
 
 ### Privacy & data
 
@@ -71,6 +72,13 @@ Node.js 20+ recommended. The built-in guide course lives in `src/builtin/guide/`
 
 CI runs typecheck / tests / build on push and PRs (`.github/workflows/test.yml`); deployment itself is managed from the Cloudflare console.
 
+**Service worker notes.** The site ships `public/sw.js`, which precaches the app shell so installed copies work offline. `public/_headers` serves it with `Cache-Control: no-cache` and pins the manifest to `application/manifest+json`. Two things to remember:
+
+- **Change the caching strategy → bump `VERSION` in `sw.js`.** `activate` prunes caches by name, so an unchanged name leaves old entries behind.
+- New versions are offered, never forced (the SW deliberately does not call `skipWaiting()` on install). If you ever need to un-stick a bad deploy for yourself: DevTools → Application → Service Workers → Unregister, then clear site data.
+
+To verify offline behaviour before shipping: `npm run build && npx vite preview --port 4173 --strictPort`, then `node scripts/check-pwa.mjs` (needs a local Chrome).
+
 ### License
 
 Licensed under the [Apache License 2.0](LICENSE).
@@ -94,6 +102,7 @@ Licensed under the [Apache License 2.0](LICENSE).
 - **📥 导入 / 📤 导出**——zip / tar.gz / rar 压缩包、文件夹、PDF（逐页文本）、EPUB（按章）；任何课件可导出回 zip，划词标注与问答一并带走（`moxue-notes.json`），重新导入即回到书上。密钥永不进导出文件。
 - **🌓 浅色 / 深色（水墨）**——同一套墨色语汇下的第二套配色：夜墨底、宣纸白字，青替朱砂作强调色。标题栏 ☾ / ☀ 一键切换，或在「设置 · 外观」里选浅色 / 深色 / 跟随系统。
 - **📱 手机与平板**——全面响应式：窄屏下目录变左侧抽屉、头部动作收进 ⋯ 菜单、AI 面板整屏浮出；原先只在悬停时出现的卡片按钮改为触屏常显，并用分类下拉补齐拖拽之外的归档路径。
+- **📲 可安装（PWA）**——「添加到主屏幕」后全屏打开，没有浏览器地址栏。应用外壳已预缓存，读过的书断网也能继续翻；问 AI 这类自然还是要有网。新版本不强制更新：重载提示等你点了才换，且正在著书时不会弹出来打扰。
 
 ### 隐私与数据
 
@@ -130,6 +139,13 @@ npm run build      # 产线构建到 dist/
 3. 首次部署后站点在 `https://<项目名>.pages.dev`，此后每次推送到 `main` 自动重新部署。
 
 CI 在 push / PR 时运行 typecheck / 测试 / 构建（`.github/workflows/test.yml`）；部署本身由 Cloudflare 控制台管理。
+
+**Service Worker 注意事项。** 站点带 `public/sw.js`，预缓存应用外壳，让装到桌面的副本离线可用。`public/_headers` 给它加了 `Cache-Control: no-cache`，并把清单钉成 `application/manifest+json`。两点要记：
+
+- **改了缓存策略就把 `sw.js` 里的 `VERSION` 往上抬。** `activate` 按缓存名清理，名字不变旧条目会一直留着。
+- 新版本只提示、不强制替换（SW 故意不在 install 时调 `skipWaiting()`）。万一某次部署把自己黏住了：DevTools → Application → Service Workers → Unregister，再清站点数据。
+
+发布前想验证离线行为：`npm run build && npx vite preview --port 4173 --strictPort`，再 `node scripts/check-pwa.mjs`（需要本机有 Chrome）。
 
 ### 许可
 
