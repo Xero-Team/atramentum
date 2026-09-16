@@ -79,6 +79,32 @@ CI runs typecheck / tests / build on push and PRs (`.github/workflows/test.yml`)
 
 To verify offline behaviour before shipping: `npm run build && npx vite preview --port 4173 --strictPort`, then `node scripts/check-pwa.mjs` (needs a local Chrome).
 
+### Building an Android APK
+
+The same `dist/` also ships as an Android app via [Capacitor](https://capacitorjs.com).
+
+**Getting a build:** push to `main`, or run the **Android APK** workflow manually from the Actions tab. When it goes green, download `moxue-debug-apk` from that run's Artifacts and sideload it (you'll need to allow installs from unknown sources). The APK is ~5.7 MB and bundles the whole app including the built-in guide, so it works with no network at all.
+
+**Why Capacitor and not a TWA.** A Trusted Web Activity looks like a native app but actually renders inside **Chrome's process** — uninstall Chrome and it stops working, and its data lives in Chrome's profile. Capacitor bundles `dist/` into the APK and runs it on the system Android System WebView, so it is genuinely independent of which browser is installed, with storage in the app's own sandbox.
+
+**What differs from the web build** (all of it behind `src/platform.ts`):
+
+| | Web / PWA | Android APK |
+|---|---|---|
+| Origin | your domain | `https://localhost` — storage is completely separate |
+| Service worker | on (offline app shell) | off; the assets are already inside the APK |
+| Export zip | browser download | written to app cache, then the system share sheet |
+| Back button | browser back | system back closes overlays first, then exits |
+
+Bring-your-own-key AI works the same and still needs a network, like any other build.
+
+**Notes for maintainers**
+
+- `android/` is **not committed**. CI regenerates it with `npx cap add android` so it always matches the Capacitor version in `package.json`. Never hand-edit it — put customisation in `capacitor.config.ts` and `resources/android/`.
+- Icons and the splash screen live in `resources/android/res/` and are **generated locally** by `node scripts/make-icons.mjs`, then committed, because the CI image has no Chrome. Re-run it after changing the seal artwork.
+- Needs **Node 22+** (Capacitor CLI 8 requirement) and JDK 17+ to build locally; CI uses Node 22 + JDK 21.
+- CI produces a **debug-signed** APK — fine for sideloading and sharing. Publishing to Google Play needs your own release keystore, which belongs in repository secrets, not here.
+
 ### License
 
 Licensed under the [Apache License 2.0](LICENSE).
@@ -146,6 +172,32 @@ CI 在 push / PR 时运行 typecheck / 测试 / 构建（`.github/workflows/test
 - 新版本只提示、不强制替换（SW 故意不在 install 时调 `skipWaiting()`）。万一某次部署把自己黏住了：DevTools → Application → Service Workers → Unregister，再清站点数据。
 
 发布前想验证离线行为：`npm run build && npx vite preview --port 4173 --strictPort`，再 `node scripts/check-pwa.mjs`（需要本机有 Chrome）。
+
+### 打包成 Android APK
+
+同一份 `dist/` 也能出成 Android 应用，走 [Capacitor](https://capacitorjs.com)。
+
+**怎么拿到包：** 推到 `main`，或在 Actions 页面手动跑 **Android APK**。跑绿之后在那次运行的 Artifacts 里下载 `moxue-debug-apk`，侧载安装即可（需要允许「安装未知来源应用」）。APK 约 5.7 MB，整个应用连带内置指南都打在里面，完全断网也能用。
+
+**为什么用 Capacitor 而不是 TWA。** TWA 看着像原生应用，实际渲染跑在 **Chrome 的进程里**——卸载 Chrome 就打不开，数据也在 Chrome 的配置里。Capacitor 把 `dist/` 打进 APK，跑在系统 Android System WebView 上，所以真正独立于你装没装浏览器，存储也在应用自己的沙箱里。
+
+**和网页版的差别**（都收在 `src/platform.ts` 一个口子上）：
+
+| | 网页 / PWA | Android APK |
+|---|---|---|
+| origin | 你的域名 | `https://localhost`，存储与浏览器完全隔离 |
+| Service Worker | 开（离线外壳） | 关；资源本来就在包里 |
+| 导出 zip | 浏览器下载 | 写进应用缓存后交给系统分享面板 |
+| 返回键 | 浏览器返回 | 系统返回先关浮层，退到底才退出应用 |
+
+自带密钥的问 AI 行为一致，同样需要联网。
+
+**维护须知**
+
+- `android/` **不入库**。CI 每次用 `npx cap add android` 现生成，保证与 `package.json` 里的 Capacitor 版本一致。别手工改它——定制一律放 `capacitor.config.ts` 和 `resources/android/`。
+- 图标与启动画面在 `resources/android/res/`，由 `node scripts/make-icons.mjs` **本地生成后提交**（CI 镜像里没有 Chrome）。改了印章图形记得重跑。
+- 本地构建需要 **Node 22+**（Capacitor CLI 8 的要求）和 JDK 17+；CI 用 Node 22 + JDK 21。
+- CI 出的是 **debug 签名**的包，自己装、发给朋友都行。要上 Google Play 得自备 release keystore，那属于仓库 secrets，不该进代码。
 
 ### 许可
 
