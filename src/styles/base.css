@@ -81,6 +81,33 @@
   }
 }
 
+@layer components {
+  /* 书籍卡片上的操作区（重命名 / 删除 / 分类）。
+     桌面端收在右上角、悬停才现；触屏设备没有 hover，一律常显并参与文档流，
+     否则重命名、删除、移出分类在手机上根本无从触发（旁边的 Link 会直接跳走）。 */
+  .card-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.375rem;
+    margin-bottom: 0.75rem;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .card-actions {
+      position: absolute;
+      top: 0.5rem;
+      right: 0.5rem;
+      z-index: 10;
+      margin-bottom: 0;
+      display: none;
+    }
+    .group:hover > .card-actions,
+    .group:focus-within > .card-actions {
+      display: flex;
+    }
+  }
+}
+
 /* 左侧滑出的历史抽屉 */
 @keyframes moxue-drawer-in {
   from {
