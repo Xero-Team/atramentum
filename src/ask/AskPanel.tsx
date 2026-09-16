@@ -1,5 +1,9 @@
-// AI 面板：问 AI（划词/自由提问，Agent 式：自主检索课件并展示工作流程）与改写本节两种模式。
-// 划词问答与会话自动存库（threads），可随时从「历史」抽屉复现、续问、删除——复现只读本地，不重发请求。
+// The AI panel: Ask AI (about a selection or a free-form question; agentic —
+// it looks through the course on its own and shows the workflow) and rewrite
+// the current lesson.
+// Selection Q&A and free-form conversations are saved automatically (threads)
+// and can be replayed, continued or deleted from the History drawer at any
+// time — replay only reads local records, it sends nothing.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { chatStream, describeAIError, isAbortError } from '../ai/providers'
@@ -17,99 +21,88 @@ import { storeFor } from '../course'
 import type { CourseMeta } from '../types/course'
 import { stripFenceWrap } from '../generate/pipeline'
 import { useSettingsStore } from '../store/settingsStore'
+import { tr, useI18n } from '../i18n'
 
 interface Turn {
   role: 'user' | 'assistant'
   content: string
-  /** 仅 assistant：完成后渲染 markdown */
+  /** assistant only: render as markdown once complete */
   done?: boolean
-  /** 仅 assistant：'edit' 结果提供「应用」按钮 */
+  /** assistant only: an 'edit' result offers an Apply button */
   kind?: 'ask' | 'edit'
-  /** 仅 assistant（ask）：本轮 agent 工作流时间线（步骤 + 轮间叙述） */
+  /** assistant only (ask): this round's agent workflow timeline (steps + between-round narration) */
   flow?: FlowItem[]
 }
 
 export interface AskSeed {
-  /** 划选原文；历史复现时为空 */
+  /** The selected text; empty when replaying history */
   selection: string
-  /** 每次划问递增（用时间戳），驱动新一轮会话 */
+  /** Bumped on every selection-ask (a timestamp), to drive a new conversation */
   nonce: number
-  /** 从已有标注点进来：复用该标注已存的会话 */
+  /** Entered from an existing highlight: reuse the conversation already stored on it */
   annotationId?: string
-  /** 选区上下文；历史复现时直接带回，不再从 DOM 推断 */
+  /** Selection context; carried back verbatim on replay instead of being inferred from the DOM */
   before?: string
   after?: string
-  /** 历史复现：装载这段会话，不发任何请求 */
+  /** Replay: load this conversation and send no request at all */
   thread?: AskThread
 }
 
 type Mode = 'ask' | 'edit'
 
-const EDIT_SYSTEM =
-  '你是「墨痕」AI 陪学的课件编辑。用户会给出一份课件的当前正文与修改要求，请按要求改写。' +
-  '只输出改写后的完整 Markdown 正文（从 H1 标题开始到结尾），保持原结构（H1 → blockquote 目标 → --- 分小节 → 自我检测练习），' +
-  '代码块/ASCII 图用无语言标注的 ``` 围栏；不要任何解释，不要用代码围栏包裹整篇。'
-
-/** 首问（划词）的完整载荷：选区 + 所在节 + 前后文 */
+/** Opening payload for a selection ask: the selection + its lesson + surrounding text */
 function buildSelectionPayload(ctx: AskContext, courseTitle: string): string {
+  const p = tr().ask.payload
   return [
-    `【课件】${courseTitle}`,
-    ctx.sectionTitle && `【所在节】${ctx.sectionTitle}`,
-    ctx.before && `【选区前文】…${ctx.before}`,
-    `【用户划选】${ctx.selection}`,
-    ctx.after && `【选区后文】${ctx.after}…`,
+    `[${p.course}] ${courseTitle}`,
+    ctx.sectionTitle && `[${p.section}] ${ctx.sectionTitle}`,
+    ctx.before && `[${p.before}] …${ctx.before}`,
+    `[${p.selection}] ${ctx.selection}`,
+    ctx.after && `[${p.after}] ${ctx.after}…`,
     '',
-    '请解释划选内容。',
+    p.explainSelection,
   ]
     .filter(Boolean)
     .join('\n')
 }
 
-/** 自由提问的首条载荷 */
+/** Opening payload for a free-form question */
 function buildFreePayload(
   question: string,
   courseTitle: string,
   sectionTitle: string,
   sectionText: string | null,
 ): string {
+  const p = tr().ask.payload
   return [
-    `【课件】${courseTitle}`,
-    sectionTitle && `【正在阅读】${sectionTitle}`,
-    sectionText && `【本节全文】\n${sectionText}`,
+    `[${p.course}] ${courseTitle}`,
+    sectionTitle && `[${p.reading}] ${sectionTitle}`,
+    sectionText && `[${p.sectionFull}]\n${sectionText}`,
     '',
-    `【问题】${question}`,
+    `[${p.question}] ${question}`,
   ]
     .filter(Boolean)
     .join('\n')
 }
 
-/** 改写载荷：整节正文 + 要求 */
+/** Rewrite payload: the whole lesson body + the request */
 function buildEditPayload(instruction: string, courseTitle: string, sectionTitle: string, sectionText: string): string {
+  const p = tr().ask.payload
   return [
-    `【课件】${courseTitle}`,
-    `【所在节】${sectionTitle}`,
-    `【当前正文】\n${sectionText}`,
+    `[${p.course}] ${courseTitle}`,
+    `[${p.section}] ${sectionTitle}`,
+    `[${p.currentText}]\n${sectionText}`,
     '',
-    `【修改要求】${instruction}`,
+    `[${p.editRequest}] ${instruction}`,
     '',
-    '请输出改写后的完整正文。',
+    p.outputRewrite,
   ].join('\n')
 }
 
-/** 首问载荷较长，用户气泡只展示划选文本本身 */
-function payloadDisplay(payload: string): string {
-  const m = /【用户划选】([\s\S]*?)(?:\n【|$)/.exec(payload)
-  if (m) return m[1]
-  const q = /【问题】([\s\S]*?)(?:\n【|$)/.exec(payload)
-  if (q) return q[1]
-  const req = /【修改要求】([\s\S]*?)(?:\n【|$)/.exec(payload)
-  if (req) return `改写：${req[1]}`
-  return payload
-}
-
-/* ── 工作流程展示（仿 Codex：步骤行 + 轮间叙述，步骤可展开看工具输出） ── */
+/* ── Workflow display (Codex-style: step rows + between-round narration; steps expand to show tool output) ── */
 
 function StepRow({ step }: { step: AgentStep }) {
+  const { t } = useI18n()
   const [open, setOpen] = useState(false)
   const running = step.status === 'running'
   return (
@@ -132,7 +125,9 @@ function StepRow({ step }: { step: AgentStep }) {
         >
           {step.label}
         </span>
-        {step.detail && <span className="ml-auto shrink-0 pl-2 text-ink-faint">{open ? '收起' : '详情'}</span>}
+        {step.detail && (
+          <span className="ml-auto shrink-0 pl-2 text-ink-faint">{open ? t.ask.stepCollapse : t.ask.stepDetail}</span>
+        )}
       </button>
       {open && step.detail && (
         <pre className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap break-all border border-ink/10 bg-paper px-2 py-1.5 font-mono text-[11px] leading-5 text-ink-faint">
@@ -144,9 +139,10 @@ function StepRow({ step }: { step: AgentStep }) {
 }
 
 function FlowBlock({ items }: { items: FlowItem[] }) {
+  const { t } = useI18n()
   return (
     <div className="mb-2 border border-ink/10 bg-paper-deep/40 px-3 py-2">
-      <p className="mb-1.5 text-[11px] font-semibold tracking-[0.2em] text-ink-faint">工 作 流 程</p>
+      <p className="mb-1.5 text-[11px] font-semibold tracking-[0.2em] text-ink-faint">{t.ask.flowTitle}</p>
       <div className="space-y-1.5">
         {items.map((f, i) =>
           f.kind === 'step' ? (
@@ -162,7 +158,7 @@ function FlowBlock({ items }: { items: FlowItem[] }) {
   )
 }
 
-/** md 以下面板是整屏浮出的；只有这个形态下系统返回才该关掉它（md 以上是并排的一栏） */
+/** Below md the panel is a full-screen overlay; only then should the system back gesture close it (above md it is a side-by-side column) */
 function useIsNarrowViewport(): boolean {
   const [narrow, setNarrow] = useState(() => window.matchMedia?.('(max-width: 767px)')?.matches ?? false)
   useEffect(() => {
@@ -195,29 +191,32 @@ export function AskPanel({
   courseId: string
   courseTitle: string
   sectionTitle: string
-  /** 当前课时路径：问答与标注按节归属 */
+  /** Path of the current lesson: Q&A and highlights are filed under it */
   currentPath: string
-  /** 当前课件 meta；提供后问 AI 进入 Agent 模式（可浏览/检索课件） */
+  /** Current course meta; when given, Ask AI goes agentic (it can browse and search the course) */
   course?: CourseMeta | null
   getProseRoot: () => HTMLElement | null
   getSectionText: () => Promise<string | null>
   seed: AskSeed | null
-  /** 当前课件是否可改写（builtin 需先 fork，返回的 promise 会处理） */
+  /** Whether the current course can be edited (built-ins are forked first; the returned promise handles it) */
   canEdit: boolean
   onClose: () => void
   onOpenSettings: () => void
   onApplyEdit: (text: string) => Promise<string | null>
-  /** 标注或问答落库后通知阅读器重画标记 */
+  /** Tell the reader to repaint the marks after a highlight or conversation is stored */
   onNotesChanged?: () => void
-  /** 打开问答历史抽屉（抽屉挂在阅读器层，从屏幕左侧滑出） */
+  /** Open the Q&A history drawer (it lives on the reader layer and slides in from the left) */
   onOpenHistory?: () => void
 }) {
+  const { t } = useI18n()
   const ai = useSettingsStore((s) => s.ai)
 
-  // 触屏：软键盘没有 Shift，Enter 得让给换行（发送走按钮）；文案也要跟着换
+  // Touch: soft keyboards have no Shift, so Enter has to mean newline (sending
+  // goes through the button instead) — and the hint text has to match.
   const [coarsePointer] = useState(() => window.matchMedia?.('(pointer: coarse)')?.matches ?? false)
 
-  // 窄屏下面板是整屏浮层，系统返回先关它；md 以上是并排的一栏，返回该按路由走
+  // Below md the panel is a full-screen overlay, so system-back closes it first;
+  // above md it is a side-by-side column and back should follow the route.
   useBackToClose(useIsNarrowViewport(), onClose)
 
   const [turns, setTurns] = useState<Turn[]>([])
@@ -230,7 +229,7 @@ export function AskPanel({
   const [applyMsg, setApplyMsg] = useState('')
   const [savedMsg, setSavedMsg] = useState('')
 
-  // agent 运行中的工作流与流式文本（完成后固化进对应 turn）
+  // Workflow and streaming text while the agent runs (frozen into the turn once done)
   const [live, setLive] = useState('')
   const [liveFlow, setLiveFlow] = useState<FlowItem[]>([])
   const liveFlowRef = useRef<FlowItem[]>([])
@@ -241,18 +240,19 @@ export function AskPanel({
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
-  // 本轮会话的持久化身份：划词时先立（与标注一一对应），自由提问到落库时才补
+  // Persistent identity of this conversation: created up front for a selection
+  // ask (one-to-one with its highlight), and only on save for a free-form one.
   const threadIdRef = useRef<string | null>(null)
   const selectionRef = useRef('')
   const ctxRef = useRef<{ sectionTitle: string; before: string; after: string }>({ sectionTitle: '', before: '', after: '' })
-  // turns 的镜像：持久化时读它拿最新一轮，而不用等 React 状态刷新
+  // Mirror of turns: persistence reads it for the latest round without waiting for React state to flush
   const turnsRef = useRef<Turn[]>([])
   const setTurnsBoth = useCallback((updater: (t: Turn[]) => Turn[]) => {
     turnsRef.current = updater(turnsRef.current)
     setTurns(turnsRef.current)
   }, [])
 
-  /** 课件只读访问口（问 AI 的工具后端） */
+  /** Read-only access to the course files (the backend for Ask AI's tools) */
   const courseFiles = useMemo<CourseFiles | null>(() => {
     if (!course) return null
     const store = storeFor(course.source)
@@ -268,9 +268,11 @@ export function AskPanel({
   }, [])
 
   /**
-   * 把当前会话写回库。划词问答与自由问答都在回答结束后调用——
-   * 追问会更新同一条记录（threadIdRef 不变），因此历史里看到的就是完整对话。
-   * 一字未出（模型报错 / 立刻停止）不留空壳记录。
+   * Write the current conversation back to the database. Called after every
+   * answer, for selection asks and free-form ones alike — follow-ups update the
+   * same record (threadIdRef does not change), so the history shows the whole
+   * conversation. A round that produced nothing (model error / immediate stop)
+   * leaves no empty shell behind.
    */
   const persistCurrent = useCallback(async (): Promise<AskThread | null> => {
     const snapshot = turnsRef.current.filter((t) => t.content || t.flow?.length)
@@ -298,33 +300,33 @@ export function AskPanel({
     try {
       await saveThread(thread)
       onNotesChanged?.()
-      setSavedMsg('已存')
+      setSavedMsg(t.ask.saved)
       setTimeout(() => setSavedMsg(''), 2000)
       return thread
     } catch (e) {
-      console.warn('[moxue] 问答存库失败', e)
+      console.warn('[moxue] could not save the Q&A thread', e)
       return null
     }
-  }, [courseId, currentPath, onNotesChanged])
+  }, [courseId, currentPath, onNotesChanged, t])
 
-  /** 改写模式跑一轮（单轮流式，非 agent） */
+  /** Run one round in rewrite mode (single stream, not the agent) */
   const runStream = useCallback(
-    async (payload: string) => {
+    async (payload: string, display: string) => {
       const config = useSettingsStore.getState().ai
       if (!config.apiKey || !config.model) {
-        setError('尚未配置 AI：请先填写请求地址与 API Key。')
+        setError(t.ask.notConfigured)
         return
       }
       apiMsgsRef.current = [...apiMsgsRef.current, { role: 'user', content: payload }]
-      setTurnsBoth((t) => [...t, { role: 'user', content: payloadDisplay(payload) }, { role: 'assistant', content: '', kind: 'edit' }])
+      setTurnsBoth((t) => [...t, { role: 'user', content: display }, { role: 'assistant', content: '', kind: 'edit' }])
       setError('')
       setStreaming(true)
       const controller = new AbortController()
       abortRef.current = controller
-      let acc = '' // 本轮已生成的增量（含中断场景）
+      let acc = '' // what this round has produced so far (kept on abort too)
       try {
         const full = await chatStream(config, {
-          messages: [{ role: 'system', content: EDIT_SYSTEM }, ...apiMsgsRef.current],
+          messages: [{ role: 'system', content: tr().ask.system }, ...apiMsgsRef.current],
           temperature: 0.4,
           signal: controller.signal,
           onDelta: (chunk) => {
@@ -349,7 +351,7 @@ export function AskPanel({
         })
       } catch (e) {
         if (isAbortError(e)) {
-          // 用户停止：保留已生成的部分
+          // User stopped: keep whatever was produced
           if (acc) {
             const clean = stripFenceWrap(acc)
             apiMsgsRef.current = [...apiMsgsRef.current, { role: 'assistant', content: acc }]
@@ -364,7 +366,7 @@ export function AskPanel({
           }
         } else {
           setError(describeAIError(e))
-          // 一字未出的空占位撤掉，留着已生成部分
+          // Drop the empty placeholder if nothing came out; keep any partial content
           setTurnsBoth((t) => {
             const last = t[t.length - 1]
             return last?.role === 'assistant' && !last.content ? t.slice(0, -1) : t
@@ -375,15 +377,15 @@ export function AskPanel({
         abortRef.current = null
       }
     },
-    [scrollToEnd],
+    [scrollToEnd, t],
   )
 
-  /** 问 AI 模式：Agent 循环（浏览/检索课件 → 作答），工作流以步骤流展示 */
+  /** Ask AI mode: the agent loop (browse/search the course → answer), shown as a step stream */
   const runAgentAsk = useCallback(
     async (payload: string, display: string) => {
       const config = useSettingsStore.getState().ai
       if (!config.apiKey || !config.model) {
-        setError('尚未配置 AI：请先填写请求地址与 API Key。')
+        setError(t.ask.notConfigured)
         return
       }
       setTurnsBoth((t) => [...t, { role: 'user', content: display }, { role: 'assistant', content: '', kind: 'ask' }])
@@ -423,7 +425,7 @@ export function AskPanel({
           },
           onTurn: (text, final) => {
             if (!final && text.trim()) {
-              // 工具轮的叙述移入工作流区，回答区腾给最终答案
+              // Narration from a tool round moves into the workflow block, leaving the answer area for the final answer
               flow.push({ kind: 'note', text: text.trim() })
               syncFlow()
               setLive('')
@@ -442,7 +444,7 @@ export function AskPanel({
       } catch (e) {
         const hasFlow = flow.length > 0
         if (isAbortError(e)) {
-          // 用户停止：保留已生成的部分与工作流
+          // User stopped: keep what was produced and the workflow
           if (acc || hasFlow) {
             setTurnsBoth((t) => {
               const next = [...t]
@@ -471,14 +473,16 @@ export function AskPanel({
         setLiveFlow([])
         liveFlowRef.current = []
         abortRef.current = null
-        // 回答落定即入库：历史抽屉里立刻能看到，切页/关页也不丢
+        // Store as soon as the answer lands: it shows up in the history drawer
+        // right away and survives navigating away or closing the page.
         void persistCurrent()
       }
     },
-    [courseFiles, courseTitle, sectionTitle, scrollToEnd, persistCurrent],
+    [courseFiles, courseTitle, sectionTitle, scrollToEnd, persistCurrent, t],
   )
 
-  // 新一轮会话（nonce 变化）：历史复现直接装载；新划词先立标注与问答记录，再开问
+  // A new conversation (nonce change): a replay loads straight away; a fresh
+  // selection creates its highlight and thread record first, then asks.
   const lastNonce = useRef<number>(-1)
   useEffect(() => {
     if (!seed || seed.nonce === lastNonce.current) return
@@ -491,22 +495,23 @@ export function AskPanel({
     setError('')
     setSavedMsg('')
 
-    // ① 历史复现：读本地记录，不发请求、不新建记录
+    // ① Replay: read local records, send nothing, create nothing
     if (seed.thread) {
       applyThread(seed.thread)
       return
     }
 
-    // ② 新划词 / 从标注继续问：解析上下文 → 立标注与记录 → 问 AI
+    // ② Fresh selection / continue from a highlight: extract the context → create the highlight and record → ask
     const host = getProseRoot() ?? document.body
     const threadId = `${courseId}:t:${seed.nonce}`
     void (async () => {
-      // 没配 AI 就一个字节都不会发出去——此时不该在正文里留下任何痕迹
+      // With no AI configured not a single byte goes out — and nothing should be left behind in the prose either
       const cfg = useSettingsStore.getState().ai
       if (!cfg.apiKey || !cfg.model) return
       let ctx: AskContext
       if (seed.annotationId) {
-        // 从已有标注进入（该标注还没有问答）：按锚点还原选区，重新取上下文
+        // Entered from an existing highlight that has no Q&A yet: restore the
+        // selection from its anchor and re-extract the context
         const ann = await getAnnotation(seed.annotationId).catch(() => undefined)
         if (!ann) return
         const hit = resolveAnchor(host, ann.anchor)
@@ -515,7 +520,7 @@ export function AskPanel({
         await updateAnnotation(ann.id, { threadId }).catch(() => undefined)
       } else {
         ctx = extractAskContext(host, seed.selection)
-        // 划词即成标注：先上墨（高亮），笔记可稍后补
+        // Selecting text creates the highlight right away; the note can come later
         const anchor = anchorFromSelection(host, ctx.selection)
         if (anchor) {
           const now = Date.now()
@@ -533,13 +538,15 @@ export function AskPanel({
           }).catch(() => undefined)
         }
       }
-      // 上下文与锚点都取完了，收起选区——留着的话浏览器选区会一直盖在标注上
+      // Context and anchor are captured, so drop the selection — otherwise the
+      // browser's selection stays painted over the highlight
       clearSelection()
       selectionRef.current = ctx.selection
       ctxRef.current = { sectionTitle: ctx.sectionTitle, before: ctx.before, after: ctx.after }
       threadIdRef.current = threadId
       const now = Date.now()
-      // 先写占位记录：问答进行中它就已出现在历史里（实时查看），回答完原地补齐
+      // Write a placeholder record first: it is already visible in the history
+      // while the answer streams, and gets filled in place when it lands
       await saveThread({
         id: threadId,
         courseId,
@@ -569,14 +576,15 @@ export function AskPanel({
       void (async () => {
         const sectionText = await getSectionText()
         if (!sectionText) {
-          setError('本节内容尚未加载，无法改写。')
+          setError(t.ask.sectionNotLoaded)
           return
         }
-        void runStream(buildEditPayload(text, courseTitle, sectionTitle, sectionText))
+        void runStream(buildEditPayload(text, courseTitle, sectionTitle, sectionText), t.ask.rewriteLabel(text))
       })()
       return
     }
-    // 首条自由提问带课程/小节上下文（可选附全文）；后续轮次由 agent 按需自查
+    // The first free-form question carries the course/lesson context (optionally
+    // the full text); later rounds have the agent look things up as needed
     const isFirst = apiMsgsRef.current.length === 0 && historyRef.current.length === 0
     if (isFirst) {
       void (async () => {
@@ -590,7 +598,7 @@ export function AskPanel({
 
   const onInputKey = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key !== 'Enter' || e.shiftKey) return
-    // 触屏的软键盘没有 Shift，Enter 一律当换行用，发送交给下面的「发送」按钮
+    // No Shift on a touch soft keyboard, so Enter always inserts a newline there and the Send button does the sending
     if (coarsePointer) return
     e.preventDefault()
     send()
@@ -614,20 +622,20 @@ export function AskPanel({
     el.style.height = `${Math.min(el.scrollHeight, 144)}px`
   }
 
-  /** 就地复现一段历史会话：只读本地记录，不重发任何请求，之后可继续追问 */
+  /** Replay a stored conversation in place: reads local records only, sends no request, and can be continued afterwards */
   const applyThread = useCallback(
-    (t: AskThread) => {
+    (thread: AskThread) => {
       abortRef.current?.abort()
-      apiMsgsRef.current = t.apiMessages ?? []
-      threadIdRef.current = t.id
-      selectionRef.current = t.selection
-      ctxRef.current = { sectionTitle: t.sectionTitle, before: t.before, after: t.after }
-      const answers = t.turns.filter((x) => x.role === 'assistant')
+      apiMsgsRef.current = thread.apiMessages ?? []
+      threadIdRef.current = thread.id
+      selectionRef.current = thread.selection
+      ctxRef.current = { sectionTitle: thread.sectionTitle, before: thread.before, after: thread.after }
+      const answers = thread.turns.filter((x) => x.role === 'assistant')
       let ai = 0
-      historyRef.current = t.turns
+      historyRef.current = thread.turns
         .filter((x) => x.role === 'user')
         .map((q) => ({ q: q.content, a: answers[ai++]?.content ?? '' }))
-      setTurnsBoth(() => t.turns.map((x) => ({ ...x, done: true })))
+      setTurnsBoth(() => thread.turns.map((x) => ({ ...x, done: true })))
       setMode('ask')
       setError('')
       setSavedMsg('')
@@ -637,14 +645,16 @@ export function AskPanel({
   )
 
   return (
-    /* md 以下整屏浮层：640~767px 之间目录树本来就是收起的，再让面板占 420px
-       只剩两百来像素给正文，两头都难受。md 以上才作为第三栏并排。
-       注意触屏上不要给显式高度——`fixed inset-0` 的高度来自视口本身，
-       写死 h-full(100vh) 反而会被移动浏览器的地址栏盖住底部的输入舱。 */
+    /* Below md, a full-screen overlay: between 640 and 767px the table of contents
+       is collapsed anyway, and giving the panel 420px would leave the prose about
+       two hundred pixels — bad at both ends. Only above md does it become a third
+       column. Note: no explicit height on touch — `fixed inset-0` takes its height
+       from the viewport, while a hard-coded h-full (100vh) would let mobile
+       browsers hide the composer behind the address bar. */
     <aside className="relative flex h-full w-full shrink-0 flex-col border-l border-ink/15 bg-paper-deep/30 max-md:fixed max-md:inset-0 max-md:z-40 max-md:border-l-0 md:w-[420px]">
       <header className="flex items-center justify-between gap-2 border-b border-ink/10 px-4 py-3">
         <div className="min-w-0">
-          <h2 className="font-song text-sm font-bold tracking-widest text-ink">问 AI</h2>
+          <h2 className="font-song text-sm font-bold tracking-widest text-ink">{t.ask.title}</h2>
           <p className="mt-0.5 truncate text-xs text-ink-faint">
             {courseTitle}
             {savedMsg && <span className="ml-2 text-cinnabar">✓ {savedMsg}</span>}
@@ -654,14 +664,14 @@ export function AskPanel({
           <button
             className="border border-ink/15 px-2.5 py-2 text-xs text-ink-soft transition hover:border-cinnabar/50 hover:text-cinnabar-deep md:py-0.5"
             onClick={() => onOpenHistory?.()}
-            title="本书的划词标注与问答历史（从左侧滑出）"
+            title={t.ask.historyHint}
           >
-            历史
+            {t.ask.history}
           </button>
           <button
             className="-my-2 -mr-1 p-2 text-ink-faint transition hover:text-cinnabar"
             onClick={onClose}
-            aria-label="关闭问答"
+            aria-label={t.ask.close}
           >
             ✕
           </button>
@@ -671,38 +681,30 @@ export function AskPanel({
       {!ai.apiKey || !ai.model ? (
         <div className="flex-1 overflow-y-auto p-4">
           <div className="border border-ink/15 bg-paper p-4 text-sm leading-6 text-ink-soft">
-            <p className="font-song font-bold text-ink">先配置 AI 接入</p>
-            <p className="mt-2">
-              填入你的 API 请求地址与密钥即可开问（支持 OpenAI 兼容端点与 Anthropic；密钥只存本机浏览器）。
-            </p>
+            <p className="font-song font-bold text-ink">{t.ask.setupTitle}</p>
+            <p className="mt-2">{t.ask.setupBody}</p>
             <button
               className="mt-3 bg-cinnabar px-3 py-2 text-xs text-paper transition hover:bg-cinnabar-deep md:py-1.5"
               onClick={onOpenSettings}
             >
-              去设置
+              {t.ask.setupAction}
             </button>
           </div>
         </div>
       ) : (
         <>
           <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-4">
-            {turns.length === 0 && (
-              <p className="text-xs leading-6 text-ink-faint">
-                提问后我会按需翻阅、检索本课件再作答，查证过程见「工作流程」；也可以直接追问。
-                在正文划选一段内容点「问」印，会自动带上上下文。
-                {canEdit && ' 切到「改写本节」可让 AI 直接修改当前小节。'}
-              </p>
-            )}
-            {turns.map((t, i) => {
-              if (t.role === 'user') {
+            {turns.length === 0 && <p className="text-xs leading-6 text-ink-faint">{t.ask.intro(canEdit)}</p>}
+            {turns.map((turn, i) => {
+              if (turn.role === 'user') {
                 return (
                   <div key={i} className="border-l-2 border-cinnabar/70 bg-ink/[0.04] px-3 py-2 text-sm leading-6 text-ink">
-                    {t.content}
+                    {turn.content}
                   </div>
                 )
               }
-              const isLive = !t.done && i === turns.length - 1 && streaming
-              const flow = isLive ? liveFlow : (t.flow ?? [])
+              const isLive = !turn.done && i === turns.length - 1 && streaming
+              const flow = isLive ? liveFlow : (turn.flow ?? [])
               return (
                 <div key={i}>
                   {flow.length > 0 && <FlowBlock items={flow} />}
@@ -713,30 +715,30 @@ export function AskPanel({
                         <span className="ml-0.5 animate-pulse text-cinnabar">▋</span>
                       </div>
                     ) : (
-                      flow.length > 0 && <p className="text-xs text-ink-faint">正在整理回答……</p>
+                      flow.length > 0 && <p className="text-xs text-ink-faint">{t.ask.thinking}</p>
                     )
                   ) : (
-                    t.content && (
+                    turn.content && (
                       <div
                         className="prose prose-moxue max-w-none text-sm"
-                        // 内容经 renderMarkdownSafe 净化后产出
-                        dangerouslySetInnerHTML={{ __html: answerHTML(t.content) }}
+                        // Output of renderMarkdownSafe, so already sanitised
+                        dangerouslySetInnerHTML={{ __html: answerHTML(turn.content) }}
                       />
                     )
                   )}
-                  {t.done && t.kind === 'edit' && canEdit && (
+                  {turn.done && turn.kind === 'edit' && canEdit && (
                     <div className="mt-2 flex items-center gap-2">
                       {applied.has(i) ? (
-                        <span className="text-xs text-ink-faint">✓ 已应用到本节</span>
+                        <span className="text-xs text-ink-faint">{t.ask.applied}</span>
                       ) : (
                         <>
                           <button
                             className="bg-cinnabar px-3 py-2 text-xs text-paper transition hover:bg-cinnabar-deep md:py-1"
-                            onClick={() => applyEdit(i, t.content)}
+                            onClick={() => applyEdit(i, turn.content)}
                           >
-                            应用到本节
+                            {t.ask.apply}
                           </button>
-                          <span className="text-xs text-ink-faint">满意再应用，不满意可继续提要求</span>
+                          <span className="text-xs text-ink-faint">{t.ask.applyHint}</span>
                         </>
                       )}
                     </div>
@@ -761,7 +763,7 @@ export function AskPanel({
                   }`}
                   onClick={() => setMode('ask')}
                 >
-                  问 AI
+                  {t.ask.modeAsk}
                 </button>
                 <button
                   className={`px-3 py-2 text-xs transition md:py-1 ${
@@ -769,7 +771,7 @@ export function AskPanel({
                   }`}
                   onClick={() => setMode('edit')}
                 >
-                  改写本节
+                  {t.ask.modeEdit}
                 </button>
                 {mode === 'ask' && apiMsgsRef.current.length === 0 && historyRef.current.length === 0 && (
                   <label className="ml-auto flex cursor-pointer items-center gap-1.5 py-1 text-xs text-ink-faint">
@@ -779,21 +781,17 @@ export function AskPanel({
                       onChange={(e) => setIncludeSection(e.target.checked)}
                       className="accent-cinnabar"
                     />
-                    附上本节全文
+                    {t.ask.includeSection}
                   </label>
                 )}
               </div>
             )}
-            {/* 一体化输入舱：聚焦时描边，底部操作条 */}
+            {/* One-piece composer: outlined on focus, action bar along the bottom */}
             <div className="rounded border border-ink/20 bg-paper transition focus-within:border-cinnabar/80">
               <textarea
                 ref={inputRef}
                 className="block max-h-36 w-full resize-none bg-transparent px-3 py-2.5 text-sm leading-6 text-ink outline-none"
-                placeholder={
-                  mode === 'edit'
-                    ? '输入修改要求，如：精简本节 / 补一个例子 / 练习出难一点…'
-                    : '问点什么吧…我会按需翻阅本课件作答'
-                }
+                placeholder={mode === 'edit' ? t.ask.placeholderEdit : t.ask.placeholderAsk}
                 rows={2}
                 value={input}
                 onChange={(e) => {
@@ -804,18 +802,14 @@ export function AskPanel({
               />
               <div className="flex items-center justify-between gap-2 border-t border-ink/10 px-2.5 py-1.5">
                 <span className="min-w-0 pl-1 text-[11px] leading-4 text-ink-faint">
-                  {mode === 'edit'
-                    ? '结果可「应用」写回本节'
-                    : coarsePointer
-                      ? '回车换行 · 点「发送」送出'
-                      : 'Enter 发送 · Shift+Enter 换行'}
+                  {mode === 'edit' ? t.ask.hintEdit : coarsePointer ? t.ask.hintTouch : t.ask.hintDesktop}
                 </span>
                 {streaming ? (
                   <button
                     className="shrink-0 border border-ink/25 px-3 py-2 text-xs text-ink-soft transition hover:border-cinnabar/60 hover:text-cinnabar-deep md:py-1"
                     onClick={() => abortRef.current?.abort()}
                   >
-                    ■ 停止
+                    {t.ask.stop}
                   </button>
                 ) : (
                   <button
@@ -823,7 +817,7 @@ export function AskPanel({
                     onClick={send}
                     disabled={!input.trim()}
                   >
-                    发送 ↵
+                    {t.ask.send}
                   </button>
                 )}
               </div>

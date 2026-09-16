@@ -1,7 +1,10 @@
-// 划词浮动工具条：选区旁浮出「问」（问 AI）与「标」（只上墨记笔记）两枚小印。
-// 触屏上系统自带的选区菜单（拷贝 / 查询 / 分享）同样贴在选区边上，所以触屏改放选区
-// 另一侧，并且按钮放大到 44px 见方——免得和系统菜单叠在一起、也免得手指点不中。
+// The floating toolbar for a text selection: two little seals — "ask" (Ask AI)
+// and "mark" (highlight + note, no AI) — pop up beside the selection.
+// On touch devices the system's own selection menu (copy / look up / share) sits
+// against the selection too, so there we move the seals to the other side and
+// grow the buttons to 44px square: clear of that menu, and big enough to hit.
 import { useLayoutEffect, useRef, useState } from 'react'
+import { useI18n } from '../i18n'
 
 const GAP = 8
 
@@ -16,18 +19,20 @@ export function FloatingToolbar({
   onAsk,
   onMark,
 }: {
-  /** 选区右下角 */
+  /** Bottom-right corner of the selection */
   x: number
   y: number
-  /** 选区上沿 */
+  /** Top edge of the selection */
   selTop: number
   onAsk: () => void
   onMark: () => void
 }) {
+  const { t } = useI18n()
   const ref = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null)
 
-  // 尺寸要实测：触屏和鼠标下的按钮不一样大，硬编码会算歪
+  // Measure rather than hard-code: the buttons differ in size between touch and
+  // mouse, so a fixed guess would land in the wrong place.
   useLayoutEffect(() => {
     const el = ref.current
     if (!el) return
@@ -35,8 +40,8 @@ export function FloatingToolbar({
     const vw = window.innerWidth
     const vh = window.innerHeight
 
-    let top = y + GAP // 桌面：贴选区右下
-    if (isCoarsePointer() && selTop - h - GAP >= GAP) top = selTop - h - GAP // 触屏：翻到选区上方
+    let top = y + GAP // desktop: tuck under the selection's bottom-right
+    if (isCoarsePointer() && selTop - h - GAP >= GAP) top = selTop - h - GAP // touch: flip above it
 
     setPos({
       left: Math.max(GAP, Math.min(x, vw - w - GAP)),
@@ -48,26 +53,27 @@ export function FloatingToolbar({
     <div
       ref={ref}
       className="fixed z-40 flex items-stretch shadow-seal"
-      // 首帧放到屏外，useLayoutEffect 在绘制前就会把它挪到位，用户看不到这一下
+      // First frame goes off-screen; useLayoutEffect moves it before paint, so
+      // the user never sees that.
       style={pos ? { left: pos.left, top: pos.top } : { left: -9999, top: -9999 }}
     >
       <button
         className="h-11 w-11 bg-cinnabar font-song text-base font-bold text-paper transition hover:bg-cinnabar-deep md:h-9 md:w-9 md:text-sm"
-        onPointerDown={(e) => e.preventDefault() /* 保住选区高亮 */}
+        onPointerDown={(e) => e.preventDefault() /* keep the selection highlighted */}
         onClick={onAsk}
-        title="就这段问 AI（对话会连标注一起存下来）"
-        aria-label="问 AI"
+        title={t.toolbar.askHint}
+        aria-label={t.toolbar.askLabel}
       >
-        问
+        {t.toolbar.ask}
       </button>
       <button
         className="h-11 w-11 border border-l-0 border-ink/25 bg-paper font-song text-base font-bold text-ink-soft transition hover:border-cinnabar/60 hover:text-cinnabar-deep md:h-9 md:w-9 md:text-sm"
         onPointerDown={(e) => e.preventDefault()}
         onClick={onMark}
-        title="高亮并记笔记（不上 AI）"
-        aria-label="标注并记笔记"
+        title={t.toolbar.markHint}
+        aria-label={t.toolbar.markLabel}
       >
-        标
+        {t.toolbar.mark}
       </button>
     </div>
   )

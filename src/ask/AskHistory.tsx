@@ -1,13 +1,16 @@
 /**
- * 问答历史抽屉：本书全部划词问答与标注的清单，从屏幕左侧滑出（盖在目录树之上）。
- * - 点问答 → 在右侧面板复现整段对话（读本地记录，不重发请求，零 API 消耗）
- * - 点标注 → 跳到所在课时并打开标注卡（看问答 / 改笔记）
- * - 单条删除、整本清空
+ * Q&A history drawer: every highlight and every conversation for this book,
+ * sliding in from the left (over the table of contents).
+ * - Tap a conversation → replay it in the right-hand panel (reads local records,
+ *   sends no requests, costs no API tokens)
+ * - Tap a highlight → jump to its lesson and open the annotation card (Q&A / note)
+ * - Delete one entry, or clear the whole book
  */
 import { useCallback, useEffect, useState } from 'react'
 import type { Annotation, AskThread } from './types'
 import { deleteAnnotation, deleteThread, listAnnotations, listThreads } from '../course/dbStore'
 import { Drawer } from '../components/common/Drawer'
+import { useI18n } from '../i18n'
 
 function when(ts: number): string {
   const d = new Date(ts)
@@ -34,9 +37,10 @@ export function AskHistory({
   onClose: () => void
   onOpenThread: (t: AskThread) => void
   onOpenAnnotation: (a: Annotation) => void
-  /** 跳到标注所在课时（标注不在当前节时） */
+  /** Jump to the lesson a highlight lives in (when it is not the current one) */
   onJumpToPath: (path: string) => void
 }) {
+  const { t } = useI18n()
   const [threads, setThreads] = useState<AskThread[]>([])
   const [annotations, setAnnotations] = useState<Annotation[]>([])
   const [loading, setLoading] = useState(false)
@@ -48,7 +52,7 @@ export function AskHistory({
       setThreads(ts)
       setAnnotations(as)
     } catch (e) {
-      console.warn('[moxue] 读取问答历史失败', e)
+      console.warn('[moxue] could not read the Q&A history', e)
     } finally {
       setLoading(false)
     }
@@ -59,44 +63,39 @@ export function AskHistory({
   }, [open, load])
 
   return (
-    <Drawer open={open} onClose={onClose} label="问答与标注">
+    <Drawer open={open} onClose={onClose} label={t.askHistory.drawerLabel}>
       <header className="flex items-center justify-between gap-2 border-b border-ink/10 px-4 py-3">
         <div className="min-w-0">
-          <h3 className="font-song text-sm font-bold tracking-widest text-ink">问 答 与 标 注</h3>
-          <p className="mt-0.5 text-xs text-ink-faint">
-            共 {threads.length} 段问答 · {annotations.length} 条标注（随书自动保存）
-          </p>
+          <h3 className="font-song text-sm font-bold tracking-widest text-ink">{t.askHistory.title}</h3>
+          <p className="mt-0.5 text-xs text-ink-faint">{t.askHistory.count(threads.length, annotations.length)}</p>
         </div>
         <button
           className="-my-2 -mr-2 shrink-0 p-2 text-ink-faint transition hover:text-cinnabar"
           onClick={onClose}
-          aria-label="收起历史"
+          aria-label={t.askHistory.close}
         >
           ✕
         </button>
       </header>
 
       <div className="flex-1 space-y-5 overflow-y-auto overscroll-contain px-4 py-4">
-        {loading && <p className="text-xs text-ink-faint">读取中……</p>}
+        {loading && <p className="text-xs text-ink-faint">{t.askHistory.loading}</p>}
 
         {!loading && threads.length === 0 && annotations.length === 0 && (
-          <p className="text-xs leading-6 text-ink-faint">
-            还没有记录。在正文里划选一段内容，点浮出的「问」印——那段划词会变成一条标注，
-            问答也一并存下来，随时可以回来查看、续问或删除。
-          </p>
+          <p className="text-xs leading-6 text-ink-faint">{t.askHistory.empty}</p>
         )}
 
-        {/* 划词标注：笔记的入口 */}
+        {/* Highlights: the way into your notes */}
         {annotations.length > 0 && (
           <section>
-            <h4 className="mb-2 text-[11px] font-semibold tracking-[0.2em] text-ink-faint">划 词 标 注</h4>
+            <h4 className="mb-2 text-[11px] font-semibold tracking-[0.2em] text-ink-faint">{t.askHistory.markSection}</h4>
             <div className="space-y-2">
               {annotations.map((a) => (
                 <div key={a.id} className="border border-ink/15 bg-paper-deep/30 px-3 py-2">
                   <button
                     className="block w-full text-left"
                     onClick={() => onOpenAnnotation(a)}
-                    title="在正文中打开这条标注"
+                    title={t.askHistory.openMark}
                   >
                     <p className="line-clamp-2 font-song text-[13px] leading-6 text-ink">
                       {a.style === 'underline' ? '⋯ ' : '❙ '}
@@ -113,9 +112,9 @@ export function AskHistory({
                     <button
                       className="-my-1 shrink-0 px-1 py-1 transition hover:text-cinnabar"
                       onClick={() => onJumpToPath(a.path)}
-                      title="跳到这一节"
+                      title={t.askHistory.jumpHint}
                     >
-                      定位
+                      {t.askHistory.jump}
                     </button>
                     <button
                       className="-my-1 shrink-0 px-1 py-1 transition hover:text-cinnabar"
@@ -123,7 +122,7 @@ export function AskHistory({
                         void deleteAnnotation(a.id).then(load)
                       }}
                     >
-                      删除
+                      {t.common.remove}
                     </button>
                   </div>
                 </div>
@@ -132,35 +131,35 @@ export function AskHistory({
           </section>
         )}
 
-        {/* 问答：点开就地复现整段对话 */}
+        {/* Q&A: tap to replay the whole conversation in place */}
         {threads.length > 0 && (
           <section>
-            <h4 className="mb-2 text-[11px] font-semibold tracking-[0.2em] text-ink-faint">问 答 历 史</h4>
+            <h4 className="mb-2 text-[11px] font-semibold tracking-[0.2em] text-ink-faint">{t.askHistory.threadSection}</h4>
             <div className="space-y-2">
-              {threads.map((t) => (
-                <div key={t.id} className="border border-ink/15 bg-paper-deep/30 px-3 py-2">
+              {threads.map((th) => (
+                <div key={th.id} className="border border-ink/15 bg-paper-deep/30 px-3 py-2">
                   <button
                     className="block w-full text-left"
-                    onClick={() => onOpenThread(t)}
-                    title="在面板里重新打开这段对话"
+                    onClick={() => onOpenThread(th)}
+                    title={t.askHistory.reopen}
                   >
                     <p className="line-clamp-2 text-[13px] leading-6 text-ink">
-                      {t.selection ? `「${t.selection}」` : t.label || '自由问答'}
+                      {th.selection ? `「${th.selection}」` : th.label || t.askHistory.freeAsk}
                     </p>
-                    {preview(t) && <p className="mt-1 line-clamp-2 text-xs leading-5 text-ink-faint">{preview(t)}</p>}
+                    {preview(th) && <p className="mt-1 line-clamp-2 text-xs leading-5 text-ink-faint">{preview(th)}</p>}
                   </button>
                   <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-ink-faint">
                     <span className="min-w-0 flex-1 basis-24 truncate">
-                      {t.sectionTitle || '未定位小节'} · {when(t.createdAt)}
+                      {th.sectionTitle || t.askHistory.noSection} · {when(th.createdAt)}
                     </span>
                     <button
                       className="-my-1 shrink-0 px-1 py-1 transition hover:text-cinnabar"
                       onClick={() => {
-                        if (!window.confirm('删除这段问答？')) return
-                        void deleteThread(t.id).then(load)
+                        if (!window.confirm(t.askHistory.confirmDelete)) return
+                        void deleteThread(th.id).then(load)
                       }}
                     >
-                      删除
+                      {t.common.remove}
                     </button>
                   </div>
                 </div>
@@ -169,19 +168,17 @@ export function AskHistory({
             <button
               className="mt-3 w-full border border-dashed border-ink/25 px-3 py-2.5 text-xs text-ink-faint transition hover:border-cinnabar/50 hover:text-cinnabar"
               onClick={() => {
-                if (!window.confirm(`清空本书全部 ${threads.length} 段问答？标注与笔记会保留。`)) return
-                void Promise.all(threads.map((t) => deleteThread(t.id))).then(load)
+                if (!window.confirm(t.askHistory.confirmClear(threads.length))) return
+                void Promise.all(threads.map((th) => deleteThread(th.id))).then(load)
               }}
             >
-              清空本书问答
+              {t.askHistory.clear}
             </button>
           </section>
         )}
       </div>
 
-      <footer className="border-t border-ink/10 px-4 py-2 text-[11px] leading-5 text-ink-faint">
-        记录只存本机；导出 zip 时会连同标注一起打包，导入同一本书即可复原。
-      </footer>
+      <footer className="border-t border-ink/10 px-4 py-2 text-[11px] leading-5 text-ink-faint">{t.askHistory.footer}</footer>
     </Drawer>
   )
 }
