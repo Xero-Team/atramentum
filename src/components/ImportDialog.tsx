@@ -1,6 +1,8 @@
-// 导入对话框：压缩包（zip / tar.gz / rar）、文件夹拖拽、PDF / EPUB 书籍 → 按分类入库；
-// 包内若带 moxue-notes.json（导出 zip 的副产品）则一并复原该书划词标注与问答
-import { useRef, useState } from 'react'
+// Import dialog: archives (zip / tar.gz / rar), a dragged folder, or PDF / EPUB
+// books → filed into a category.
+// If the archive carries a moxue-notes.json (a by-product of exporting a zip),
+// the book's highlights and Q&A are restored along with it.
+import { Fragment, useRef, useState } from 'react'
 import type { DragEvent as ReactDragEvent } from 'react'
 import {
   fromFiles,
@@ -18,8 +20,9 @@ import type { RawEntry } from '../io/import'
 import { parseNotesBundle } from '../io/notes'
 import { restoreNotes } from '../io/notesDb'
 import type { CourseMeta } from '../types/course'
-import { UNCATEGORIZED, useCategoryStore } from '../store/categoryStore'
+import { useCategoryStore } from '../store/categoryStore'
 import { Overlay } from './common/Overlay'
+import { useI18n } from '../i18n'
 
 const inputCls =
   'w-full border border-ink/20 bg-paper px-2.5 py-1.5 text-sm text-ink outline-none transition focus:border-cinnabar'
@@ -27,21 +30,23 @@ const inputCls =
 type IngestFn = (title: string) => Promise<{ meta: CourseMeta }>
 
 export function ImportDialog({ onClose, onImported }: { onClose: () => void; onImported: (notice?: string) => void }) {
+  const { t } = useI18n()
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
   const [dragOver, setDragOver] = useState(false)
-  // '' = 未分类；选项来自用户自建分类
+  // '' = uncategorised; the options come from the user's own categories
   const [category, setCategory] = useState('')
   const categories = useCategoryStore((s) => s.order)
   const assignTo = useCategoryStore((s) => s.assignTo)
-  // 书名：从所选文件/文件夹名推断，可改；书籍（epub/pdf）自带书名则被其后端覆盖
+  // Title: guessed from the chosen file/folder name and editable; a book (epub/pdf)
+  // with its own title has it overwritten by that backend
   const [title, setTitle] = useState('')
   const zipInputRef = useRef<HTMLInputElement>(null)
   const dirInputRef = useRef<HTMLInputElement>(null)
-  // 本次导入包里摘出的标注文件（若有），入库成功后复原到对应书上
+  // The notes file pulled out of this import (if any), restored onto the book once it is stored
   const notesRef = useRef<string | null>(null)
 
-  /** 入库成功后把包里的划词标注复原到这本书上 */
+  /** Once the course is stored, restore the highlights this archive carried onto it */
   const restoreNotesFor = async (meta: CourseMeta): Promise<string> => {
     const raw = notesRef.current
     notesRef.current = null
@@ -51,9 +56,9 @@ export function ImportDialog({ onClose, onImported }: { onClose: () => void; onI
     try {
       const r = await restoreNotes(bundle, meta)
       if (r.annotations === 0 && r.threads === 0) return ''
-      return `已随书恢复 ${r.annotations} 条划词标注、${r.threads} 段问答。`
+      return t.importDlg.restored(r.annotations, r.threads)
     } catch (e) {
-      return `课件已导入，但标注恢复失败：${(e as Error).message}`
+      return t.importDlg.restoreFailed((e as Error).message)
     }
   }
 
@@ -73,30 +78,30 @@ export function ImportDialog({ onClose, onImported }: { onClose: () => void; onI
     }
   }
 
-  /** 整课入库的统一入口：先摘走标注文件，再走原有清洗管线 */
-  const ingestRaw = (raw: RawEntry[], t: string): Promise<{ meta: CourseMeta }> => {
+  /** One entry point for storing a whole course: pull the notes file out first, then run the usual cleaning pipeline */
+  const ingestRaw = (raw: RawEntry[], titleOverride: string): Promise<{ meta: CourseMeta }> => {
     const { entries, notesRaw } = splitNotesEntry(raw)
     notesRef.current = notesRaw
     return ingestCourse(normalizeEntries(entries), {
       source: 'imported',
-      title: guessCourseTitle(entries) || t,
-      desc: `导入课件 · ${entries.length} 个文件`,
+      title: guessCourseTitle(entries) || titleOverride,
+      desc: t.io.importedDesc(entries.length),
       category,
     })
   }
 
-  /** 单文件：按扩展名分流（压缩包 / EPUB / PDF）。压缩包的标题在解包后推断，覆盖输入框默认值 */
+  /** A single file: routed by extension (archive / EPUB / PDF). An archive's title is guessed after unpacking, overriding the input's default */
   const ingestArchiveOrBook = (file: File): IngestFn => {
-    if (/\.epub$/i.test(file.name)) return (t) => ingestBookFromEpub(file, category, t)
-    if (/\.pdf$/i.test(file.name)) return (t) => ingestBookFromPdf(file, category, t)
-    return async (t) => {
+    if (/\.epub$/i.test(file.name)) return (titleArg) => ingestBookFromEpub(file, category, titleArg)
+    if (/\.pdf$/i.test(file.name)) return (titleArg) => ingestBookFromPdf(file, category, titleArg)
+    return async (titleArg) => {
       const data = new Uint8Array(await file.arrayBuffer())
       const raw: RawEntry[] = /\.rar$/i.test(file.name)
         ? await fromRar(file)
         : /\.zip$/i.test(file.name)
           ? fromZip(data)
           : fromTarGz(data)
-      return ingestRaw(raw, t)
+      return ingestRaw(raw, titleArg)
     }
   }
 
@@ -105,7 +110,7 @@ export function ImportDialog({ onClose, onImported }: { onClose: () => void; onI
     setDragOver(false)
     if (busy) return
     const items = e.dataTransfer.items
-    // 拖入单个 epub/pdf 文件直接走书籍分流；文件夹/多文件走归一化管线
+    // A single dropped epub/pdf goes straight down the book path; folders and multiple files go through the normalising pipeline
     if (items.length === 1 && items[0].kind === 'file') {
       const f = items[0].getAsFile()
       if (f && /\.(epub|pdf)$/i.test(f.name)) {
@@ -113,7 +118,7 @@ export function ImportDialog({ onClose, onImported }: { onClose: () => void; onI
         return
       }
     }
-    void run(async (t) => ingestRaw(await fromFiles(items), t))
+    void run(async (titleArg) => ingestRaw(await fromFiles(items), titleArg))
   }
 
   return (
@@ -128,11 +133,11 @@ export function ImportDialog({ onClose, onImported }: { onClose: () => void; onI
         onDrop={onDrop}
       >
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-ink/15 bg-paper px-5 py-3">
-          <h2 className="font-song text-base font-bold tracking-wide">导入</h2>
+          <h2 className="font-song text-base font-bold tracking-wide">{t.importDlg.title}</h2>
           <button
             className="-my-2 -mr-2 p-2 text-ink-faint transition hover:text-cinnabar"
             onClick={onClose}
-            aria-label="关闭"
+            aria-label={t.importDlg.close}
           >
             ✕
           </button>
@@ -140,19 +145,19 @@ export function ImportDialog({ onClose, onImported }: { onClose: () => void; onI
 
         <div className="space-y-4 p-5">
           <div>
-            <label className="mb-1 block text-sm font-semibold">书名（自动从文件名推断，可修改）</label>
+            <label className="mb-1 block text-sm font-semibold">{t.importDlg.nameLabel}</label>
             <input
               className={inputCls}
-              placeholder="留空则用文件 / 文件夹名"
+              placeholder={t.importDlg.namePlaceholder}
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               disabled={busy}
             />
           </div>
           <div>
-            <label className="mb-1 block text-sm font-semibold">归入分类（可稍后在书架用卡片上的分类下拉调整）</label>
+            <label className="mb-1 block text-sm font-semibold">{t.importDlg.categoryLabel}</label>
             <select className={inputCls} value={category} onChange={(e) => setCategory(e.target.value)}>
-              <option value="">{UNCATEGORIZED}</option>
+              <option value="">{t.shelf.uncategorized}</option>
               {categories.map((c) => (
                 <option key={c} value={c}>
                   {c}
@@ -166,13 +171,14 @@ export function ImportDialog({ onClose, onImported }: { onClose: () => void; onI
               dragOver ? 'border-cinnabar bg-cinnabar/5' : 'border-ink/30'
             }`}
           >
-            <p className="font-song text-lg font-bold text-ink">拖入文件 · 或点击选择</p>
+            <p className="font-song text-lg font-bold text-ink">{t.importDlg.dropTitle}</p>
             <p className="mt-2 text-xs leading-6 text-ink-faint">
-              课件：整门课的压缩包（zip / tar.gz / rar）或课件文件夹。
-              <br />
-              书籍：PDF / EPUB（自动按章节分页，纯阅读，同样可划词标注）。
-              <br />
-              手机上「选择文件夹」多半不可用，请改用 zip 压缩包。
+              {t.importDlg.dropLines.map((line, i) => (
+                <Fragment key={i}>
+                  {i > 0 && <br />}
+                  {line}
+                </Fragment>
+              ))}
             </p>
             <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
               <button
@@ -180,27 +186,27 @@ export function ImportDialog({ onClose, onImported }: { onClose: () => void; onI
                 onClick={() => zipInputRef.current?.click()}
                 disabled={busy}
               >
-                选择文件
+                {t.importDlg.pickFiles}
               </button>
               <button
                 className="border border-ink/25 px-4 py-2 text-sm text-ink-soft transition hover:border-cinnabar/50 hover:text-cinnabar-deep disabled:opacity-50 md:py-1.5"
                 onClick={() => dirInputRef.current?.click()}
                 disabled={busy}
               >
-                选择文件夹
+                {t.importDlg.pickDir}
               </button>
             </div>
           </div>
 
-          {busy && <p className="text-sm text-ink-soft">解析入库中……</p>}
+          {busy && <p className="text-sm text-ink-soft">{t.importDlg.busy}</p>}
           {msg && <p className="border border-cinnabar/40 bg-cinnabar/5 px-3 py-2 text-sm leading-6 text-cinnabar-deep">{msg}</p>}
 
           <p className="text-xs leading-5 text-ink-faint">
-            课件仅导入文本类文件（md / 代码 / 配置），单个不超过 2MB；书籍抽取文本后入库（不含图片）。
-            全部保存在浏览器本地（IndexedDB），不会自动上传。
+            {t.importDlg.limits}
             <br />
-            若压缩包里有导出的 <code className="font-mono">moxue-notes.json</code>（划词标注与问答），
-            会在入库后一并复原到这本书上。
+            {t.importDlg.notesPrefix}
+            <code className="font-mono">moxue-notes.json</code>
+            {t.importDlg.notesSuffix}
           </p>
         </div>
 
@@ -215,7 +221,7 @@ export function ImportDialog({ onClose, onImported }: { onClose: () => void; onI
             if (files.length === 0) return
             const file = files[0]
             if (!/\.(zip|rar|tar\.gz|tgz|pdf|epub)$/i.test(file.name)) {
-              setMsg('请选择 zip / tar.gz / rar 压缩包或 PDF / EPUB 书籍，课件文件夹请用「选择文件夹」。')
+              setMsg(t.importDlg.wrongFileType)
               return
             }
             if (!title.trim()) setTitle(guessCourseTitle([{ path: file.name, data: new Uint8Array(0) }]))
@@ -233,7 +239,7 @@ export function ImportDialog({ onClose, onImported }: { onClose: () => void; onI
             e.target.value = ''
             if (files.length === 0) return
             if (!title.trim()) setTitle(guessCourseTitle(files.map((f) => ({ path: f.webkitRelativePath || f.name, data: new Uint8Array(0) }))))
-            void run(async (t) => ingestRaw(await fromFiles(files), t))
+            void run(async (titleArg) => ingestRaw(await fromFiles(files), titleArg))
           }}
         />
       </div>
