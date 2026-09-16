@@ -1,9 +1,10 @@
 import type { CourseMeta, CourseTree } from '../types/course'
 import type { CourseStore } from './CourseStore'
 import { buildTree } from './structure'
+import { tr } from '../i18n'
 
-// HashRouter 下相对路径会基于 #/… 解析，必须显式拼 base
-const BASE = import.meta.env.BASE_URL // './' 或 '/'
+// Under HashRouter a relative path resolves against #/…, so the base has to be prepended explicitly
+const BASE = import.meta.env.BASE_URL // './' or '/'
 const MANIFEST_URL = `${BASE}courses/manifest.json`
 
 interface Manifest {
@@ -16,9 +17,9 @@ let manifestPromise: Promise<CourseMeta[]> | null = null
 
 async function fetchManifest(): Promise<CourseMeta[]> {
   const res = await fetch(MANIFEST_URL)
-  if (!res.ok) throw new Error(`manifest.json 加载失败 (${res.status})`)
+  if (!res.ok) throw new Error(tr().course.manifestFailed(res.status))
   const data = (await res.json()) as Manifest
-  // 课件内路径统一 posix 分隔符（旧版 bundle 脚本在 Windows 上产出过反斜杠清单）
+  // Course paths use posix separators throughout (an older bundle script emitted backslashes on Windows)
   return data.courses.map((c) => ({
     ...c,
     files: c.files.map((f) => f.replace(/\\/g, '/')),
@@ -38,7 +39,7 @@ async function fetchText(courseId: string, path: string): Promise<string | null>
   return res.text()
 }
 
-/** 内置课件：随站静态资源 */
+/** Built-in courses: static assets shipped with the site */
 export const builtinStore: CourseStore = {
   async list() {
     manifestPromise ??= fetchManifest()
@@ -52,7 +53,7 @@ export const builtinStore: CourseStore = {
       if (!meta) return null
       return buildTree(meta, (p) => fetchText(id, p))
     })())
-    // 构树失败（网络抖动等）不缓存rejected promise，下次可重试
+    // A failed tree build (a network blip, say) must not cache the rejected promise, so the next call can retry
     treeCache.get(id)!.catch(() => treeCache.delete(id))
     return treeCache.get(id)!
   },

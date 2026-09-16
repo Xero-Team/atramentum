@@ -1,16 +1,17 @@
 import type { CourseMeta, CourseTree, LessonNode } from '../types/course'
+import { tr } from '../i18n'
 
-// 数字前缀：01_xxx.md / 00_foundations/README.md
+// Numeric prefixes: 01_xxx.md / 00_foundations/README.md
 const NUM_PREFIX = /^(\d+)[_\-]?(.*)$/
 
-// 可作为「正文」的文档扩展名：md 课件 + epub 章节导出的 html + pdf 逐页文本
+// Extensions that count as body text: md courses, the html exported from epub chapters, and the per-page text of a pdf
 const DOC_EXT = /\.(md|html?|txt)$/i
 
 function stripExt(p: string): string {
   return p.replace(DOC_EXT, '')
 }
 
-/** 数字前缀排序比较器（无前缀的排后面，按字典序） */
+/** Numeric-prefix ordering (anything without a prefix sorts after, alphabetically) */
 function pathCompare(a: string, b: string): number {
   const na = NUM_PREFIX.exec(stripExt(a).split('/').pop() ?? '')
   const nb = NUM_PREFIX.exec(stripExt(b).split('/').pop() ?? '')
@@ -25,7 +26,7 @@ function pathCompare(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0
 }
 
-/** 从 markdown 文本提取首个 H1 作为标题 */
+/** Take the first H1 in the markdown as the title */
 export function titleFromMarkdown(text: string): string {
   const m = /^#\s+(.+)$/m.exec(text)
   if (m) return m[1].trim().replace(/[*`_]/g, '')
@@ -37,20 +38,21 @@ function basename(p: string): string {
   return i >= 0 ? p.slice(i + 1) : p
 }
 
-/** 文件名 → 可读标题：01_what_is_os.md → 01 · What is os；纯数字页/章文件 → 第 N 节 */
+/** File name → readable title: 01_what_is_os.md → 01 · What is os; a purely numeric page/chapter file → Section N */
 function titleFromFile(path: string, text?: string): string {
   if (text) {
     const t = titleFromMarkdown(text)
-    if (t && t !== '未命名') return t
+    // A placeholder H1 is not a title, so fall through to the file name instead
+    if (t && t !== '未命名' && t !== 'Untitled') return t
   }
   const base = stripExt(basename(path))
-  if (/^\d+$/.test(base)) return `第 ${parseInt(base, 10)} 节`
+  if (/^\d+$/.test(base)) return tr().course.untitledSection(parseInt(base, 10))
   const m = NUM_PREFIX.exec(base)
   if (m) return `${m[1]} · ${m[2].replace(/[_-]/g, ' ').trim() || base}`
   return base.replace(/[_-]/g, ' ')
 }
 
-// INDEX.md 表格行：| 01 | [标题](路径.md/.html/.txt) | ... 可能有更多列
+// An INDEX.md table row: | 01 | [title](path.md/.html/.txt) | ... there may be more columns
 const TABLE_ROW = /^\s*\|\s*`?(\d+)`?\s*\|\s*\[([^\]]+)\]\(([^)]+\.(?:md|html?|txt))\)/i
 
 interface ParsedTable {
@@ -58,7 +60,7 @@ interface ParsedTable {
   hasStructure: boolean
 }
 
-/** 解析 markdown 文本里的表格行链接（INDEX.md / 章节 README 的目录表） */
+/** Parse the table-row links out of markdown (the INDEX.md / chapter README table of contents) */
 function parseIndexTable(text: string): ParsedTable {
   const rows: ParsedTable['rows'] = []
   for (const line of text.split(/\r?\n/)) {
@@ -69,11 +71,12 @@ function parseIndexTable(text: string): ParsedTable {
 }
 
 /**
- * 构建课件目录树。
- * 优先级：
- * 1. 根 INDEX.md 表格 → 章；若章是目录且含 README，再解析 README 的表格 → 节
- * 2. 回退：manifest 文件清单按数字前缀排序组织
- * 变体兼容：平铺（INDEX 链接直接是 01_xxx.md）；单文件（唯一 md）
+ * Build a course tree.
+ * In order of preference:
+ * 1. The root INDEX.md table → chapters; when a chapter is a directory with a README,
+ *    parse that README's table too → sections
+ * 2. Fall back to organising the manifest's file list by numeric prefix
+ * Variants handled: flat (INDEX links straight to 01_xxx.md) and single-file (one md).
  */
 export function buildTree(meta: CourseMeta, readFile: (path: string) => Promise<string | null>): Promise<CourseTree> {
   return buildTreeSync(meta, (p) => readFile(p))
@@ -86,13 +89,13 @@ async function buildTreeSync(
   const mdFiles = meta.files.filter((f) => f.toLowerCase().endsWith('.md'))
   const docFiles = meta.files.filter((f) => DOC_EXT.test(f))
 
-  // 单文件课件：唯一文档就是全部
+  // Single-file course: the one document is the whole thing
   if (meta.kind === 'single' || docFiles.length === 1) {
     const path = docFiles[0] ?? ''
     return { meta, lessons: [{ path, title: meta.title }] }
   }
 
-  // 1) 尝试根 INDEX.md
+  // 1) Try the root INDEX.md
   const indexKey = mdFiles.find((f) => f === 'INDEX.md' || f === 'index.md' || f.endsWith('/INDEX.md'))
   if (indexKey) {
     const indexText = await readFile(indexKey)
@@ -111,11 +114,11 @@ async function buildTreeSync(
     }
   }
 
-  // 2) 回退：目录/文件名数字前缀组织
+  // 2) Fall back to organising by directory / file name numeric prefix
   return fallbackTree(meta, docFiles)
 }
 
-/** 章 → 目录（解析 README 表格为节）或直接 lesson（平铺 md） */
+/** A chapter → either a directory (its README table parsed into sections) or a lesson directly (a flat md) */
 async function chapterNode(
   meta: CourseMeta,
   readFile: (path: string) => Promise<string | null>,
@@ -124,7 +127,7 @@ async function chapterNode(
 ): Promise<LessonNode> {
   const dir = dirname(target)
   if (dir && basename(target).toLowerCase() === 'readme.md') {
-    // 目录章：README 为主课，表格链接为节
+    // A directory chapter: the README is the main lesson and the table links are its sections
     const readmeText = await readFile(target)
     let children: LessonNode[] = []
     if (readmeText) {
@@ -137,7 +140,7 @@ async function chapterNode(
         }
       }
       if (children.length === 0) {
-        // 表格缺失：目录内数字前缀 md 兜底（README 除外）
+        // No table: fall back to the numerically-prefixed mds in the directory (README aside)
         const prefix = dir + '/'
         children = meta.files
           .filter((f) => f.startsWith(prefix) && f.toLowerCase().endsWith('.md') && basename(f).toLowerCase() !== 'readme.md')
@@ -148,16 +151,16 @@ async function chapterNode(
     const title = (readmeText ? titleFromMarkdown(readmeText) : '') || fallbackTitle
     return { path: target, title, children: children.length ? children : undefined }
   }
-  // 平铺课件：INDEX 直接链到节文件
+  // A flat course: INDEX links straight to the section files
   return { path: target, title: fallbackTitle }
 }
 
-/** 回退组织：顶层文档按数字前缀；若多文件同目录则该目录 README 为章 */
+/** Fallback organisation: top-level documents by numeric prefix; when several files share a directory, that directory's README becomes a chapter */
 function fallbackTree(meta: CourseMeta, docFiles: string[]): CourseTree {
   const sorted = [...docFiles].sort(pathCompare)
   const lessons: LessonNode[] = []
 
-  // 目录型：每章目录取 README（或首个 md）为章，其余 md 为节
+  // Directory style: each chapter directory takes its README (or first md) as the chapter and the rest as sections
   const byDir = new Map<string, string[]>()
   for (const f of sorted) {
     const dir = dirname(f)
@@ -192,7 +195,7 @@ function fallbackTree(meta: CourseMeta, docFiles: string[]): CourseTree {
     return { meta, lessons }
   }
 
-  // 平铺型：顶层 md 直接为课（INDEX.md 单列导航不重复展示）
+  // Flat style: top-level mds are lessons directly (INDEX.md is navigation and is not shown twice)
   for (const f of sorted) {
     if (f.toLowerCase() === 'index.md') continue
     lessons.push({ path: f, title: titleFromFile(f) })
@@ -200,7 +203,7 @@ function fallbackTree(meta: CourseMeta, docFiles: string[]): CourseTree {
   return { meta, lessons: lessons.length ? lessons : sorted.map((f) => ({ path: f, title: titleFromFile(f) })) }
 }
 
-// ---- 路径工具（课件路径恒为 posix 相对路径） ----
+// ---- Path helpers (course paths are always posix relative paths) ----
 
 function dirname(p: string): string {
   const i = p.lastIndexOf('/')
@@ -208,7 +211,7 @@ function dirname(p: string): string {
 }
 
 export function resolveRelative(fromFile: string, link: string): string | null {
-  // 忽略锚点/查询
+  // Drop the anchor / query
   const clean = link.split('#')[0].split('?')[0]
   if (!clean || !DOC_EXT.test(clean)) return null
   if (/^[a-z]+:\/\//i.test(clean)) return null
@@ -219,7 +222,7 @@ export function resolveRelative(fromFile: string, link: string): string | null {
   for (const seg of segments) {
     if (seg === '' || seg === '.') continue
     if (seg === '..') {
-      if (out.length === 0) return null // 越出课程根（如 ../os/…）→ 调用方提示
+      if (out.length === 0) return null // climbed out of the course root (../os/…, say) → the caller warns
       out.pop()
     } else {
       out.push(seg)

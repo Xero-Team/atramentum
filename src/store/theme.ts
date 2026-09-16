@@ -1,12 +1,14 @@
 /**
- * 主题模式：浅色 / 深色 / 跟随系统。
+ * Theme mode: light / dark / follow the system.
  *
- * 真正生效的开关是 <html data-theme="light|dark">——所有色值都是 base.css 里的
- * CSS 变量，Tailwind 端只认变量名（见 tailwind.config.ts）。这样 500+ 处
- * bg-paper / text-ink / border-ink/15 的调用一处都不用改就跟着换肤。
+ * The switch that actually takes effect is <html data-theme="light|dark"> — every colour
+ * is a CSS variable in base.css and Tailwind only knows the variable names (see
+ * tailwind.config.ts). That way 500+ bg-paper / text-ink / border-ink/15 call sites
+ * reskin without a single change.
  *
- * 之所以要在 main.tsx 里于 React 挂载前同步调一次 initTheme()：persist 走
- * localStorage 是同步的，能赶在首帧之前把属性写好，避免深色用户看到白闪。
+ * initTheme() is called synchronously from main.tsx before React mounts because the
+ * localStorage-backed persist is synchronous: the attribute can be written before the
+ * first frame, sparing dark-mode users a white flash.
  */
 import { useEffect, useState } from 'react'
 import { useSettingsStore } from './settingsStore'
@@ -16,7 +18,7 @@ export type { ThemeMode }
 
 const DARK_QUERY = '(prefers-color-scheme: dark)'
 
-/** 浅色 / 深色下 <html> 上的主题名 */
+/** The theme name put on <html> for light / dark */
 export type ResolvedTheme = 'light' | 'dark'
 
 function systemPrefersDark(): boolean {
@@ -29,27 +31,29 @@ export function resolveTheme(mode: ThemeMode): ResolvedTheme {
 }
 
 /**
- * 换 favicon。浏览器把图标当独立文档渲染，CSS 里的 `[data-theme=dark]` 和
- * `prefers-color-scheme` 都够不着我们手动的主题开关，只能换 link 的 href。
+ * Swapping the favicon. A browser renders the icon as its own document, so neither
+ * `[data-theme=dark]` nor `prefers-color-scheme` in our CSS can reach a manually
+ * toggled theme — the only lever is the link's href.
  *
- * 浅色 = 朱砂印（与站内的印章同色），深色 = 墨印。深色只在标签栏上露个白「墨」字，
- * 这本来就是小图标的常态。
+ * Light = the cinnabar seal (the same colour as the seals in the app), dark = the ink
+ * seal. In dark the tab shows a white 墨 and nothing else, which is what a small icon
+ * looks like anyway.
  */
 let iconHrefLight: string | null = null
 
 function setFavicon(resolved: ResolvedTheme): void {
   const link = document.querySelector<HTMLLinkElement>('link[rel="icon"]')
   if (!link) return
-  // 只记第一次读到的那个 href（构建后是 './favicon.svg'，base 可能是子路径），
-  // 拿它当基准推深色版，免得自己拼路径拼错
+  // Remember the href as first read (after a build it is './favicon.svg', and the base
+  // may be a subpath); deriving the dark variant from it beats assembling the path by hand
   if (iconHrefLight === null) iconHrefLight = link.getAttribute('href') ?? ''
   const m = /^(.*)\.svg$/i.exec(iconHrefLight)
-  if (!m) return // 不是 svg 图标就不折腾
+  if (!m) return // not an svg icon, so leave it alone
   const href = resolved === 'dark' ? `${m[1]}-dark.svg` : iconHrefLight
   if (link.getAttribute('href') !== href) link.setAttribute('href', href)
 }
 
-/** 把主题写到 <html> 上（CSS 变量随之切换），并同步 favicon */
+/** Write the theme onto <html> (the CSS variables follow) and sync the favicon */
 export function applyTheme(mode: ThemeMode): void {
   const resolved = resolveTheme(mode)
   document.documentElement.dataset.theme = resolved
@@ -59,8 +63,8 @@ export function applyTheme(mode: ThemeMode): void {
 }
 
 /**
- * 启动时调用一次：立即上色，并订阅「设置变更」与「系统外观变更」。
- * 返回取消订阅函数。
+ * Call once at startup: apply the theme immediately and subscribe to setting changes
+ * and system appearance changes. Returns an unsubscribe function.
  */
 export function initTheme(): () => void {
   applyTheme(useSettingsStore.getState().theme)
@@ -71,7 +75,7 @@ export function initTheme(): () => void {
 
   const mq = window.matchMedia?.(DARK_QUERY)
   const onSystemChange = () => {
-    // 只有「跟随系统」时才需要响应系统切换
+    // Only "follow the system" needs to react to a system switch
     if (useSettingsStore.getState().theme === 'system') applyTheme('system')
   }
   mq?.addEventListener('change', onSystemChange)
@@ -82,7 +86,7 @@ export function initTheme(): () => void {
   }
 }
 
-/** 当前实际生效的是浅色还是深色（「跟随系统」时跟着系统走，会随系统切换重渲染） */
+/** Whether light or dark is actually in effect (under "follow the system" this tracks the system and re-renders when it switches) */
 export function useResolvedTheme(): ResolvedTheme {
   const mode = useSettingsStore((s) => s.theme)
   const [sysDark, setSysDark] = useState(systemPrefersDark)
@@ -91,7 +95,7 @@ export function useResolvedTheme(): ResolvedTheme {
     const mq = window.matchMedia?.(DARK_QUERY)
     if (!mq) return
     const onChange = () => setSysDark(mq.matches)
-    onChange() // 首帧之后系统可能已经切过，先对齐一次
+    onChange() // the system may have switched since the first frame, so sync once
     mq.addEventListener('change', onChange)
     return () => mq.removeEventListener('change', onChange)
   }, [])
@@ -100,7 +104,7 @@ export function useResolvedTheme(): ResolvedTheme {
   return mode
 }
 
-/** 图标按钮用的一键切换：深色 ⇄ 浅色（当前是「跟随系统」时切到其反面） */
+/** One-click toggle for the icon button: dark ⇄ light (from "follow the system" it goes to the opposite of what is showing) */
 export function useThemeToggle(): { resolved: ResolvedTheme; toggle: () => void } {
   const resolved = useResolvedTheme()
   const setTheme = useSettingsStore((s) => s.setTheme)

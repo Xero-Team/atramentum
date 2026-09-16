@@ -1,22 +1,24 @@
 /**
- * Dexie-backed CourseStore：imported / generated 共用（meta 里已带 source）。
- * 同时提供入库 / 删除 / 配额预检，供 io 与生成流水线调用。
+ * The Dexie-backed CourseStore, shared by imported and generated (the meta carries
+ * its source). It also provides storing, deleting and quota checks for the io layer
+ * and the generation pipeline.
  */
 import Dexie, { type Table } from 'dexie'
 import type { CourseMeta, CourseTree } from '../types/course'
 import type { Annotation, AskThread } from '../ask/types'
 import { buildTree } from './structure'
 import type { CourseStore } from './CourseStore'
+import { tr } from '../i18n'
 
-/* ───────── 数据库 ───────── */
+/* ───────── Database ───────── */
 
 export interface StoredCourse extends CourseMeta {
   createdAt: number
-  /** 课时规划骨架（AI 著书产物；续写时恢复完整规划用，不进阅读目录树） */
+  /** The lesson-plan skeleton (a Write-with-AI artefact; used to restore the full plan when continuing, and never shown in the reading tree) */
   plan?: StoredPlan
 }
 
-/** 课时规划骨架：标题 + 要点 + 原始需求，随课程记录持久化 */
+/** The lesson-plan skeleton: titles + key points + the original requirements, persisted with the course record */
 export interface StoredPlan {
   topic: string
   requirements?: string
@@ -32,7 +34,7 @@ export interface StoredFile {
 class MoxueDB extends Dexie {
   courses!: Table<StoredCourse, string>
   files!: Table<StoredFile, [string, string]>
-  /** 划词标注与问答会话：随课件持久化，可导出/导入（书籍类也可用） */
+  /** Highlights and Q&A conversations: persisted with the course and exportable/importable (books included) */
   annotations!: Table<StoredAnnotation, string>
   threads!: Table<StoredThread, string>
 
@@ -42,7 +44,7 @@ class MoxueDB extends Dexie {
       courses: 'id, source, createdAt',
       files: '[courseId+path], courseId',
     })
-    // v2：只有新增表，courses/files 不动——升级时既有书架与课件原样保留
+    // v2 only adds tables; courses/files are untouched, so an upgrade leaves the existing shelf and courses exactly as they were
     this.version(2).stores({
       courses: 'id, source, createdAt',
       files: '[courseId+path], courseId',
@@ -57,16 +59,16 @@ export type StoredThread = AskThread
 
 export const db = new MoxueDB()
 
-/* ───────── CourseStore 实现（imported / generated 共用） ───────── */
+/* ───────── CourseStore implementation (shared by imported and generated) ───────── */
 
 const treeCache = new Map<string, Promise<CourseTree | null>>()
 
-/** 课件更新/删除后失效其目录树缓存 */
+/** Invalidate a course's tree cache after it is updated or deleted */
 export function invalidateTree(id: string): void {
   treeCache.delete(id)
 }
 
-/** 读取时补齐新字段默认值（旧数据迁移） */
+/** Fill in defaults for newer fields on read (migrating old data) */
 function withDefaults(meta: CourseMeta): CourseMeta {
   return { ...meta, category: meta.category || '学习', format: meta.format || 'md' }
 }
@@ -74,9 +76,9 @@ function withDefaults(meta: CourseMeta): CourseMeta {
 function makeDbStore(source: CourseMeta['source']): CourseStore {
   return {
     async list() {
-      // imported/generated 共用一张表，必须按 source 过滤——否则每门课在书架出现两份
+      // imported and generated share one table, so it must be filtered by source — otherwise every course shows up twice on the shelf
       const all = await db.courses.where('source').equals(source).toArray()
-      // createdAt 是存储层字段，不进 CourseMeta
+      // createdAt is a storage-layer field and stays out of CourseMeta
       return all.map(({ createdAt: _createdAt, ...meta }) => withDefaults(meta))
     },
 
@@ -105,30 +107,30 @@ function makeDbStore(source: CourseMeta['source']): CourseStore {
 export const importedStore: CourseStore = makeDbStore('imported')
 export const generatedStore: CourseStore = makeDbStore('generated')
 
-/* ───────── 写入 / 删除 / 配额 ───────── */
+/* ───────── Writing / deleting / quota ───────── */
 
 function fmtSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
-/** 写入前预检配额（约 95% 阈值），不足直接抛错 */
+/** Check the quota before writing (at roughly a 95% threshold) and throw outright when there is not enough room */
 export async function assertQuota(neededBytes: number): Promise<void> {
   if (!navigator.storage?.estimate) return
   const { usage = 0, quota = Number.POSITIVE_INFINITY } = await navigator.storage.estimate()
   if (usage + neededBytes > quota * 0.95) {
-    throw new Error(`浏览器存储空间不足：需约 ${fmtSize(neededBytes)}，可用约 ${fmtSize(Math.max(0, quota - usage))}`)
+    throw new Error(tr().course.quotaExceeded(fmtSize(neededBytes), fmtSize(Math.max(0, quota - usage))))
   }
 }
 
-/** 整课入库（覆盖同 id 旧文件）；files 为已归一化的 posix 相对路径；plan 为可选的课时规划骨架 */
+/** Store a whole course (overwriting any files under the same id); files are normalised posix relative paths; plan is an optional lesson-plan skeleton */
 export async function saveCourse(
   meta: CourseMeta,
   files: { path: string; text: string }[],
   createdAt = Date.now(),
   plan?: StoredPlan,
 ): Promise<void> {
-  await assertQuota(files.reduce((n, f) => n + f.text.length * 2, 0) /* UTF-16 粗估 */)
+  await assertQuota(files.reduce((n, f) => n + f.text.length * 2, 0) /* rough UTF-16 estimate */)
   await db.transaction('rw', db.courses, db.files, async () => {
     await db.courses.put({ ...meta, createdAt, plan })
     await db.files.where('courseId').equals(meta.id).delete()
@@ -137,20 +139,21 @@ export async function saveCourse(
   invalidateTree(meta.id)
 }
 
-/** 创建课程记录（AI 著书实时入库：先立 meta 与 INDEX，课时写完逐个补文件）。
- *  plan 一并落库——中途关浏览器留下的记录也能被「续写」完整恢复。 */
+/** Create the course record (live saving while Write-with-AI runs: the meta and
+ *  INDEX go in first, then each lesson file as it lands). The plan is stored too,
+ *  so a record left behind by closing the browser can be fully restored by a continuation. */
 export async function createCourseRecord(meta: CourseMeta, plan?: StoredPlan, createdAt = Date.now()): Promise<void> {
   await db.courses.put({ ...meta, createdAt, plan })
   await db.files.where('courseId').equals(meta.id).delete()
   invalidateTree(meta.id)
 }
 
-/** 单独写回课时规划骨架（不影响文件与目录树；首次入库走 ingestCourse 后补写） */
+/** Write the lesson-plan skeleton back on its own (files and the tree are untouched; the first store goes through ingestCourse and this is written after) */
 export async function saveCoursePlan(courseId: string, plan: StoredPlan): Promise<void> {
   await db.courses.update(courseId, { plan })
 }
 
-/** 读取课时规划骨架（仅 imported/generated 存于课程记录；无则返回 undefined） */
+/** Read the lesson-plan skeleton (only imported/generated keep one on the record; undefined when there is none) */
 export async function loadCoursePlan(courseId: string): Promise<StoredPlan | undefined> {
   const rec = await db.courses.get(courseId)
   return rec?.plan
@@ -160,26 +163,28 @@ export async function deleteCourse(id: string): Promise<void> {
   await db.transaction('rw', db.courses, db.files, db.annotations, db.threads, async () => {
     await db.courses.delete(id)
     await db.files.where('courseId').equals(id).delete()
-    // 划词标注与问答随书一起消失，避免重新导入同名书时冒出上一本的笔记
+    // The highlights and Q&A go with the course, so re-importing a book of the same name does not resurrect the previous copy's notes
     await db.annotations.where('courseId').equals(id).delete()
     await db.threads.where('courseId').equals(id).delete()
   })
   invalidateTree(id)
 }
 
-/** 重命名课件（仅本地来源；同步更新印章字） */
+/** Rename a course (local sources only; the seal glyph is updated with it) */
 export async function renameCourse(id: string, title: string): Promise<void> {
   const name = title.trim()
-  if (!name) throw new Error('标题不能为空')
-  await db.courses.update(id, { title: name, seal: [...name][0] || '课' })
+  if (!name) throw new Error(tr().course.titleRequired)
+  await db.courses.update(id, { title: name, seal: [...name][0] || name[0] })
   invalidateTree(id)
 }
 
-/** 更新单文件内容（AI 改写应用 / 著书实时入库）。返回更新后的课程 meta（记录不在则 null）。
- *  实时入库必须同步把新文件追加进课程记录的 files 清单：阅读器按 meta.files 构树，
- *  只写 files 表的话清单停在 ['INDEX.md']，书会被误判成单文件课件——
- *  已写完的课时进不了目录，还会被「path 不在树内 → 跳第一节」重定向拽走，
- *  直到 finalize 全量覆盖才恢复。 */
+/** Update one file's content (applying an AI rewrite / live saving while writing).
+ *  Returns the updated course meta (null when the record is gone).
+ *  Live saving has to append the new file to the record's files list as it goes: the
+ *  reader builds its tree from meta.files, so writing only to the files table leaves
+ *  the list stuck at ['INDEX.md'], the book is misread as a single-file course, the
+ *  finished lessons never reach the tree, and a "path not in tree → jump to the first
+ *  section" redirect drags the reader away — until finalize overwrites everything. */
 export async function updateCourseFile(courseId: string, path: string, text: string): Promise<CourseMeta | null> {  let fresh: CourseMeta | null = null
   await db.transaction('rw', db.courses, db.files, async () => {
     await db.files.put({ courseId, path, text })
@@ -191,7 +196,7 @@ export async function updateCourseFile(courseId: string, path: string, text: str
         await db.courses.update(courseId, { files: [...files, path], fileCount: files.length + 1 })
       }
       const { createdAt: _createdAt, plan: _plan, ...meta } = rec
-      // 返回的 meta 必须带上刚追加的路径（rec 是更新前快照，直接返回会少一个文件）
+      // The returned meta must include the path just appended (rec is a pre-update snapshot and would be one file short)
       fresh = added ? { ...meta, files: [...files, path], fileCount: files.length + 1 } : meta
     }
   })
@@ -199,14 +204,14 @@ export async function updateCourseFile(courseId: string, path: string, text: str
   return fresh
 }
 
-/* ───────── 划词标注 ───────── */
+/* ───────── Highlights ───────── */
 
-/** 新建一条标注（划词高亮/下划线）；同 id 覆盖 */
+/** Create a highlight (on selecting text); the same id overwrites */
 export async function saveAnnotation(a: Annotation): Promise<void> {
   await db.annotations.put(a)
 }
 
-/** 改笔记 / 换样式；不存在则忽略 */
+/** Change the note or the style; a missing id is ignored */
 export async function updateAnnotation(id: string, patch: Partial<Annotation>): Promise<void> {
   const rec = await db.annotations.get(id)
   if (!rec) return
@@ -221,21 +226,21 @@ export async function getAnnotation(id: string): Promise<Annotation | undefined>
   return db.annotations.get(id)
 }
 
-/** 本书全部标注（按创建时间正序，便于列表展示） */
+/** Every highlight in this book, oldest first (which reads best as a list) */
 export async function listAnnotations(courseId: string): Promise<Annotation[]> {
   const rows = await db.annotations.where('courseId').equals(courseId).toArray()
   return rows.sort((a, b) => a.createdAt - b.createdAt)
 }
 
-/** 某文件的标注（阅读器渲染只关心当前节） */
+/** The highlights for one file (the reader only paints the current section) */
 export async function listAnnotationsForPath(courseId: string, path: string): Promise<Annotation[]> {
   const rows = await db.annotations.where('[courseId+path]').equals([courseId, path]).toArray()
   return rows.sort((a, b) => a.anchor.start - b.anchor.start)
 }
 
-/* ───────── 划词问答会话 ───────── */
+/* ───────── Q&A conversations ───────── */
 
-/** 写回一条会话（划词即写占位，回答完成后原地更新 → 实时可查看） */
+/** Write a conversation back (a placeholder on selection, updated in place once the answer lands, so it is visible live) */
 export async function saveThread(t: AskThread): Promise<void> {
   await db.threads.put(t)
 }
@@ -244,25 +249,25 @@ export async function deleteThread(id: string): Promise<void> {
   await db.threads.delete(id)
 }
 
-/** 本书全部问答（按划词序号倒序 = 最近在上） */
+/** Every conversation in this book, newest selection first */
 export async function listThreads(courseId: string): Promise<AskThread[]> {
   const rows = await db.threads.where('courseId').equals(courseId).toArray()
   return rows.sort((a, b) => b.createdAt - a.createdAt)
 }
 
-/** 读一条会话（历史列表点击时复现整段对话） */
+/** Read one conversation (replayed in full when the history list is tapped) */
 export async function getThread(id: string): Promise<AskThread | undefined> {
   return db.threads.get(id)
 }
 
-/* ───────── 连带清理 ───────── */
+/* ───────── Cascading cleanup ───────── */
 
-/** 导入标注包前清空本书旧标注（避免重复导入叠加两份） */
+/** Clear a book's existing highlights before importing a pack (so importing twice does not double them up) */
 export async function clearAnnotations(courseId: string): Promise<void> {
   await db.annotations.where('courseId').equals(courseId).delete()
 }
 
-/** 供 io/bundle 使用：整批写入标注/问答（导入恢复） */
+/** For the io layer: write highlights and conversations in bulk (restoring an import) */
 export async function bulkPutNotes(annotations: Annotation[], threads: AskThread[]): Promise<void> {
   await db.transaction('rw', db.annotations, db.threads, async () => {
     if (annotations.length) await db.annotations.bulkPut(annotations)

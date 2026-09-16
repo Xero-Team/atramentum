@@ -1,14 +1,15 @@
 /**
- * 分类（用户自管）：分类清单与「课件/书籍 → 分类」归属关系，存 localStorage。
- * 分类完全由用户创建/删除；未归入任何分类的内容落在「未分类」组。
- * 拖拽归档时更新 assign；删除分类时其成员自动回到「未分类」。
+ * Categories (entirely user-managed): the category list and the course/book → category
+ * assignment, stored in localStorage. Users create and delete categories; anything
+ * unassigned lands in the "uncategorised" group. Dragging a card updates assign;
+ * deleting a category sends its members back to uncategorised.
  */
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import type { CourseMeta } from '../types/course'
 
 export const UNCATEGORIZED = '未分类'
-/** 书架拖拽 dataTransfer 类型 */
+/** dataTransfer type for shelf drag and drop */
 export const COURSE_DND_MIME = 'application/x-moxue-course'
 
 export interface CategoryGroup {
@@ -17,15 +18,15 @@ export interface CategoryGroup {
 }
 
 interface CategoryState {
-  /** 用户创建的分类（有序；可为空组） */
+  /** User-created categories, ordered (a category may be empty) */
   order: string[]
-  /** courseId → 分类名；未出现的即「未分类」 */
+  /** courseId → category name; anything absent is uncategorised */
   assign: Record<string, string>
-  /** 新建分类；重名/空名/与「未分类」冲突返回 false */
+  /** Add a category; returns false for a duplicate, an empty name, or a clash with the uncategorised sentinel */
   addCategory: (name: string) => boolean
-  /** 删除分类（成员回到「未分类」） */
+  /** Delete a category (its members return to uncategorised) */
   removeCategory: (name: string) => void
-  /** 归档：传 '' 表示移出分类 */
+  /** File a course away: passing '' takes it out of any category */
   assignTo: (courseId: string, category: string) => void
 }
 
@@ -68,7 +69,7 @@ export const useCategoryStore = create<CategoryState>()(
   ),
 )
 
-/** 分组：用户分类按其排序（空组也展示，便于拖入），未分类殿后（非空才展示） */
+/** Group: user categories in their own order (empty ones shown too, as a drop target), uncategorised last (and only when non-empty) */
 export function groupCourses(
   courses: CourseMeta[],
   assign: Record<string, string>,
@@ -83,7 +84,7 @@ export function groupCourses(
     const cat = assign[c.id]
     const target = cat ? byName.get(cat) : undefined
     if (target) target.items.push(c)
-    else uncat.items.push(c) // 未归档 / 归属的分类已被删除
+    else uncat.items.push(c) // unassigned, or its category was deleted
   }
   return uncat.items.length > 0 ? [...groups, uncat] : groups
 }

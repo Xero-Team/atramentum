@@ -3,8 +3,9 @@ import { builtinStore } from './builtinStore'
 import { importedStore, generatedStore, updateCourseFile } from './dbStore'
 import { ingestCourse } from '../io/import'
 import type { CourseStore } from './CourseStore'
+import { tr } from '../i18n'
 
-// 各来源 store 注册表；Dexie 版（imported/generated）共用实现
+// The registry of per-source stores; the Dexie one backs both imported and generated
 const stores: Partial<Record<CourseMeta['source'], CourseStore>> = {
   builtin: builtinStore,
   imported: importedStore,
@@ -19,7 +20,7 @@ export function storeFor(source: CourseMeta['source']): CourseStore {
   return stores[source] ?? builtinStore
 }
 
-/** 全部来源课件汇总（书架用）；某来源不可用时跳过而非整体失败 */
+/** Every course from every source (for the shelf); an unavailable source is skipped rather than failing the whole thing */
 export async function listAllCourses(): Promise<CourseMeta[]> {
   const out: CourseMeta[] = []
   for (const s of ['builtin', 'imported', 'generated'] as const) {
@@ -28,7 +29,7 @@ export async function listAllCourses(): Promise<CourseMeta[]> {
     try {
       for (const m of await store.list()) out.push({ ...m, source: s })
     } catch {
-      // 该来源读取失败（如 IndexedDB 被禁）不影响其它来源
+      // A source that fails to read (IndexedDB disabled, say) does not affect the others
     }
   }
   return out
@@ -38,7 +39,7 @@ export async function findCourseMeta(id: string): Promise<CourseMeta | undefined
   return (await listAllCourses()).find((m) => m.id === id)
 }
 
-/** 把课件复制为可编辑的本地副本（内置课件只读，AI 改写前先 fork），返回新 meta */
+/** Copy a course into an editable local duplicate (built-ins are read-only, so an AI rewrite forks one first); returns the new meta */
 export async function forkCourseForEdit(meta: CourseMeta): Promise<CourseMeta> {
   const store = storeFor(meta.source)
   const files: { path: string; text: string }[] = []
@@ -48,7 +49,7 @@ export async function forkCourseForEdit(meta: CourseMeta): Promise<CourseMeta> {
   }
   const { meta: forked } = await ingestCourse(files, {
     source: 'imported',
-    title: `${meta.title}（副本）`,
+    title: tr().course.copy(meta.title),
     desc: meta.desc,
     category: meta.category,
     format: meta.format,
@@ -56,9 +57,9 @@ export async function forkCourseForEdit(meta: CourseMeta): Promise<CourseMeta> {
   return forked
 }
 
-/** AI 改写后的内容写回课件（仅本地可编辑来源；内置请先 forkCourseForEdit） */
+/** Write AI-rewritten content back into a course (local, editable sources only; fork a built-in with forkCourseForEdit first) */
 export async function applyCourseEdit(meta: CourseMeta, path: string, text: string): Promise<void> {
-  if (meta.source === 'builtin') throw new Error('内置课件只读，请先另存为副本')
+  if (meta.source === 'builtin') throw new Error(tr().course.builtinReadonly)
   await updateCourseFile(meta.id, path, text)
 }
 

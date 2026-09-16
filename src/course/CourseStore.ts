@@ -1,14 +1,14 @@
 import type { CourseMeta, CourseTree } from '../types/course'
 
 /**
- * CourseStore 抽象：统一 imported / generated 两种来源的课件访问。
- * 两者均由 Dexie 实现同接口。
+ * The CourseStore abstraction: one way to reach courses from either the
+ * imported or the generated source. Dexie implements this same interface for both.
  */
 export interface CourseStore {
-  /** 列出该来源全部课件（轻量，仅元信息） */
+  /** List every course from this source (lightweight: metadata only) */
   list(): Promise<CourseMeta[]>
-  /** 读课件树（含结构；实现方可缓存） */
+  /** Read a course tree (with its structure; implementations may cache) */
   loadTree(id: string): Promise<CourseTree | null>
-  /** 读单个文件文本 */
+  /** Read one file as text */
   readFile(courseId: string, path: string): Promise<string | null>
 }
