@@ -404,6 +404,24 @@ export const zh = {
   },
 
   /**
+   * Updating the installed Android app. The web build updates itself through the
+   * service worker (`settings.update*`); an APK cannot, so it asks GitHub instead.
+   */
+  appUpdate: {
+    title: '应用更新',
+    available: '有新版本可用',
+    action: '更新',
+    downloading: (percent: number | null) => (percent === null ? '下载中……' : `下载中 ${percent}%`),
+    installing: '正在安装……',
+    later: '稍后再说',
+    check: '检查更新',
+    checking: '检查中……',
+    upToDate: '已是最新版本',
+    version: (version: string, build: string) => `当前版本 ${version}（build ${build}）`,
+    failed: (msg: string) => `更新失败：${msg}`,
+  },
+
+  /**
    * The AI panel. `payload` and `system` are prompts rather than UI copy, but
    * they are translated too: a Chinese system prompt makes the model answer in
    * Chinese no matter what language the interface is in.

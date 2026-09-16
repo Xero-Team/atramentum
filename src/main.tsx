@@ -5,6 +5,7 @@ import { initTheme } from './store/theme'
 import { initLang } from './i18n'
 import { registerServiceWorker } from './pwa/register'
 import { initInstallPrompt } from './pwa/install'
+import { initAppUpdate } from './native/appUpdate'
 import './styles/base.css'
 import './styles/prose.css'
 
@@ -23,6 +24,10 @@ registerServiceWorker()
 
 // beforeinstallprompt fires early and only once, so start listening before render.
 initInstallPrompt()
+
+// An installed Android app cannot reach a new deployment the way the web build can,
+// so it checks the release for a newer APK instead. No-op on the web.
+initAppUpdate()
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

@@ -403,6 +403,20 @@ export const en: Dict = {
     epubUntitledSection: (n: number) => `Section ${n}`,
   },
 
+  appUpdate: {
+    title: 'App updates',
+    available: 'A new version is available',
+    action: 'Update',
+    downloading: (percent: number | null) => (percent === null ? 'Downloading…' : `Downloading ${percent}%`),
+    installing: 'Installing…',
+    later: 'Not now',
+    check: 'Check for updates',
+    checking: 'Checking…',
+    upToDate: 'Up to date',
+    version: (version: string, build: string) => `Version ${version} (build ${build})`,
+    failed: (msg: string) => `Update failed: ${msg}`,
+  },
+
   ask: {
     title: 'Ask AI',
     history: 'History',

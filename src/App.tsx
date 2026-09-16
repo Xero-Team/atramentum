@@ -4,6 +4,7 @@ import Reader from './components/Reader'
 import { NewCourseDialog } from './generate/NewCourseDialog'
 import { useGenerateStore } from './generate/generateStore'
 import { UpdatePrompt } from './pwa/UpdatePrompt'
+import { AppUpdatePrompt } from './native/AppUpdatePrompt'
 
 export default function App() {
   const generateOpen = useGenerateStore((s) => s.open)
@@ -18,6 +19,8 @@ export default function App() {
       {generateOpen && <NewCourseDialog />}
       {/* Prompt when the offline shell has a new version (global too, so it shows on any page) */}
       <UpdatePrompt />
+      {/* The same for an installed Android app — an APK cannot pick up a new deployment the way the web build does */}
+      <AppUpdatePrompt />
     </HashRouter>
   )
 }

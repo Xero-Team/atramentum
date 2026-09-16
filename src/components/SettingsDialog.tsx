@@ -8,10 +8,55 @@ import { useSettingsStore } from '../store/settingsStore'
 import type { ThemeMode } from '../store/settingsStore'
 import { LANG_LABEL, LANGS, useI18n } from '../i18n'
 import { promptInstall, useInstallState } from '../pwa/install'
+import { appVersion, checkAppUpdate, installAppUpdate, useAppUpdate } from '../native/appUpdate'
+import { isNative } from '../platform'
 import { Overlay } from './common/Overlay'
 
 const inputCls =
   'w-full border border-ink/20 bg-paper px-2.5 py-1.5 text-sm text-ink outline-none transition focus:border-cinnabar'
+
+/**
+ * Which build this is, and a way to look for a newer one. Native only: the web
+ * build is served fresh every time and updates itself through the service worker,
+ * but an APK carries its assets, so it can sit on an old version indefinitely.
+ */
+function AppUpdateSection() {
+  const { t } = useI18n()
+  const update = useAppUpdate()
+  const [info, setInfo] = useState<{ version: string; build: string } | null>(null)
+  useEffect(() => {
+    void appVersion().then(setInfo)
+  }, [])
+
+  const busy = update.kind === 'checking' || update.kind === 'downloading' || update.kind === 'installing'
+
+  return (
+    <section>
+      <h3 className="mb-2 text-sm font-semibold text-ink">{t.appUpdate.title}</h3>
+      {info && <p className="text-xs leading-6 text-ink-faint">{t.appUpdate.version(info.version, info.build)}</p>}
+      {update.kind === 'downloading' && (
+        <p className="text-xs leading-6 text-ink-faint">{t.appUpdate.downloading(update.percent)}</p>
+      )}
+      {update.kind === 'installing' && <p className="text-xs leading-6 text-ink-faint">{t.appUpdate.installing}</p>}
+      {update.kind === 'current' && <p className="text-xs leading-6 text-ink-faint">{t.appUpdate.upToDate}</p>}
+      {update.kind === 'error' && (
+        <p className="text-xs leading-6 text-cinnabar-deep">{t.appUpdate.failed(update.message)}</p>
+      )}
+      {update.kind === 'available' ? (
+        <button
+          className="bg-cinnabar px-4 py-2 text-sm text-paper transition hover:bg-cinnabar-deep md:py-1.5"
+          onClick={() => void installAppUpdate()}
+        >
+          {t.appUpdate.action}
+        </button>
+      ) : (
+        <button className={miniBtn} disabled={busy} onClick={() => void checkAppUpdate()}>
+          {update.kind === 'checking' ? t.appUpdate.checking : t.appUpdate.check}
+        </button>
+      )}
+    </section>
+  )
+}
 
 /** Shared shape for the small secondary buttons: 28px tall on desktop, 32px on touch. */
 const miniBtn =
@@ -188,6 +233,8 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             <p className="text-xs leading-6 text-ink-faint">{t.settings.installManual}</p>
           )}
         </section>
+
+        {isNative && <AppUpdateSection />}
 
         <section>
           <h3 className="mb-2 text-sm font-semibold text-ink">{t.settings.provider}</h3>
