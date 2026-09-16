@@ -138,6 +138,51 @@ try {
   )
   check('应用外壳已预缓存', shell.includes('/index.html') && shell.includes('/manifest.webmanifest'), shell)
 
+  // ── 安装入口：引导条 + 设置里的常驻入口 ──
+  const banner = await waitFor(
+    () =>
+      evaluate(
+        `[...document.querySelectorAll('button')].some(e => e.textContent.trim() === '安装') ? 'yes' : ''`,
+      ),
+    { label: 'beforeinstallprompt 到达', tries: 24 },
+  ).catch(() => '')
+  check('引导条接住了 beforeinstallprompt（「安装」按钮可点）', banner === 'yes',
+    banner === 'yes' ? '' : '没等到事件——引导条会退化成说明文字')
+
+  await evaluate(
+    `(() => { const b = [...document.querySelectorAll('button')].find(e => e.textContent.trim() === '设 置'); if (b) b.click(); return !!b })()`,
+  )
+  await sleep(500)
+  check('设置里有「安装到桌面」常驻入口', await evaluate(`/安装到桌面/.test(document.body.innerText)`))
+  check(
+    '设置里的安装按钮可用（说明状态是 prompt 而不是退化成说明）',
+    await evaluate(`[...document.querySelectorAll('button')].some(e => e.textContent.trim() === '安装到桌面')`),
+  )
+  // 真的点一下。注意必须用 Input.dispatchMouseEvent 派发真实事件：
+  // Runtime.evaluate 里的 el.click() 是合成点击，不带 user activation，
+  // prompt() 会直接抛 NotAllowedError——那是测试的假失败，不是应用的 bug。
+  // 反过来说，这也解释了为什么安装按钮必须是真正的 onClick：
+  // prompt() 必须在用户手势的同一条调用栈里调，挪进 useEffect/await 之后就晚了。
+  const btnAt = await evaluate(
+    `(() => { const b = [...document.querySelectorAll('button')].find(e => e.textContent.trim() === '安装到桌面'); if (!b) return null; const r = b.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 } })()`,
+  )
+  await evaluate(
+    `window.__pwaErr = null; window.addEventListener('unhandledrejection', e => { window.__pwaErr = String(e.reason) }, { once: true }); true`,
+  )
+  if (btnAt) {
+    await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: btnAt.x, y: btnAt.y, button: 'left', clickCount: 1 })
+    await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: btnAt.x, y: btnAt.y, button: 'left', clickCount: 1 })
+  }
+  await sleep(1200)
+  const pwaErr = await evaluate(`window.__pwaErr`)
+  check('以真实点击触发安装，没有抛错', pwaErr === null, String(pwaErr ?? ''))
+
+  // 关掉设置回到书架，后面的断网测试要从书架开始
+  await evaluate(
+    `(() => { const b = [...document.querySelectorAll('button')].find(e => e.getAttribute('aria-label') === '关闭'); if (b) b.click(); return !!b })()`,
+  )
+  await sleep(300)
+
   // ── 断网 ──
   await send('Network.emulateNetworkConditions', {
     offline: true,
@@ -154,8 +199,13 @@ try {
     { label: '离线渲染' },
   ).catch(() => `(没渲染出来，落地在 ${offlineUrl})`)
   check('断网后仍能打开应用（离线外壳生效）', offlineTitle === '墨痕', `h1=${offlineTitle}`)
-  const offlineCards = await evaluate(`document.querySelectorAll('a[href*="#/c/"]').length`)
-  check('离线状态下列表也渲染了', offlineCards > 0, `课程链接 ${offlineCards} 个`)
+  // 课程卡片要等内置课件清单取回来才渲染（离线走的是 SW 的 SWR 缓存），
+  // h1 是同步渲染的，不能拿它当「列表也该好了」的依据——这里得等
+  const offlineCards = await waitFor(
+    () => evaluate(`document.querySelectorAll('a[href*="#/c/"]').length`),
+    { label: '离线课程列表', tries: 30 },
+  ).catch(() => 0)
+  check('离线状态下课程列表也渲染了', offlineCards > 0, `课程链接 ${offlineCards} 个`)
 
   // ── 跨域直通：非字体域不该被 SW 缓存 ──
   await send('Network.emulateNetworkConditions', {
@@ -183,6 +233,76 @@ try {
     `caches.keys().then(ns => Promise.all(ns.filter(n => n.startsWith('moxue-')).map(n => caches.open(n).then(c => c.keys()).then(k => k.filter(r => r.url.includes('example.com')).length)))).then(a => a.reduce((x,y)=>x+y,0))`,
   )
   check('非字体的跨域请求不被 SW 拦截/缓存（问 AI 的端点是同一路径）', exoticKey === 0, `命中缓存 ${exoticKey} 条，fetch=${exotic}`)
+
+  // ── 系统返回键：先关浮层，而不是跳走 ──
+  const histLen = async () => (await send('Page.getNavigationHistory')).result.entries.length
+  /** 真实的浏览器后退（不是页面里调 history.back()） */
+  const goBack = async () => {
+    const h = (await send('Page.getNavigationHistory')).result
+    if (h.currentIndex <= 0) throw new Error('已经没有可退的历史了')
+    await send('Page.navigateToHistoryEntry', { entryId: h.entries[h.currentIndex - 1].id })
+    await sleep(600)
+  }
+
+  await send('Page.navigate', { url: APP })
+  await waitFor(() => evaluate(`document.readyState === 'complete' && !!document.querySelector('h1')`), { label: '回书架' })
+  await sleep(500)
+
+  const openSettings = `(() => { const b = [...document.querySelectorAll('button')].find(e => e.textContent.trim() === '设 置'); if (b) b.click(); return !!b })()`
+  const settingsOpen = `!![...document.querySelectorAll('h2')].find(e => e.textContent.trim() === '设置')`
+
+  await evaluate(openSettings)
+  await sleep(400)
+  check('对话框已打开（返回键测试的前置条件）', await evaluate(settingsOpen))
+
+  await goBack()
+  check(
+    '按系统返回：对话框关闭，且没有跳离应用',
+    !(await evaluate(settingsOpen)) && (await evaluate(`document.querySelector('h1')?.textContent`)) === '墨痕',
+  )
+
+  // 点 ✕ 关掉时要把压进去的那条历史弹掉，否则会留下一条「死历史」——
+  // 用户下次按返回会觉得没反应
+  const lenBefore = await histLen()
+  await evaluate(openSettings)
+  await sleep(400)
+  await evaluate(`(() => { const b = document.querySelector('button[aria-label="关闭"]'); if (b) b.click(); return !!b })()`)
+  await sleep(800)
+  check('点 ✕ 关掉后没有留下多余的历史条目', (await histLen()) === lenBefore, `${lenBefore} → ${await histLen()}`)
+
+  // ── 最容易写错的一种：关浮层的同时发生路由跳转 ──
+  // 在目录抽屉里点一节课，跳转和关抽屉在同一个事件里。如果关抽屉时无脑
+  // history.back()，会把刚做完的跳转撤销掉——这正是 useBackToClose 里那个
+  // 「当前历史还带着我的标记吗」判断要挡住的。
+  await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true })
+  await send('Page.navigate', { url: `${APP}#/c/guide` })
+  await waitFor(() => evaluate(`document.readyState === 'complete' && !!document.querySelector('h1')`), { label: '进入课件' })
+  await sleep(800)
+
+  const tocSel = `[role="dialog"][aria-label="课时目录"]`
+  const hashBefore = await evaluate(`location.hash`)
+  await evaluate(`(() => { const b = document.querySelector('button[aria-label="课时目录"]'); if (b) b.click(); return !!b })()`)
+  await sleep(400)
+  check('窄屏下 ☰ 能打开课时目录抽屉', await evaluate(`!!document.querySelector('${tocSel}')`))
+
+  const clicked = await evaluate(`(() => {
+    const d = document.querySelector('${tocSel}'); if (!d) return false
+    const items = [...d.querySelectorAll('button')].filter(e => !e.getAttribute('aria-label') && e.textContent.trim())
+    if (items.length < 2) return false
+    items[items.length - 1].click()
+    return true
+  })()`)
+  await sleep(800)
+  const hashAfter = await evaluate(`location.hash`)
+  if (clicked) {
+    check(
+      '在目录里点课时：真的跳过去了（没被「关抽屉」的 history.back 撤销）',
+      hashAfter !== hashBefore && !(await evaluate(`!!document.querySelector('${tocSel}')`)),
+      `${hashBefore} → ${hashAfter}`,
+    )
+  } else {
+    check('在目录里点课时（跳过：这门课只有一节，测不出跳转）', true)
+  }
 } catch (e) {
   check(`执行出错：${e.message}`, false)
 } finally {
