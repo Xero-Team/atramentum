@@ -87,6 +87,8 @@ export const en: Dict = {
     /** The 墨 seal is a logotype, not a word — it stays the same in every locale. */
     brandMark: '墨',
     tagline: 'Read courses and books, ask AI about any selection, write your own. Categories are yours; drag to file things away.',
+    /** Shown on touch devices only, where the drag is a long press rather than a drag */
+    touchDragHint: 'Hold a card to drag it into a category — or use the category dropdown on the card.',
     aiWrite: 'Write with AI',
     import: 'Import',
     loadFailed: (msg: string) => `Could not load the library: ${msg}`,

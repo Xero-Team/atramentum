@@ -84,6 +84,8 @@ export const zh = {
     /** The 墨 seal is a logotype, not a word — it stays the same in every locale. */
     brandMark: '墨',
     tagline: '阅读课件与书籍，划词问 AI，仿写生成。分类自建，拖放归档。',
+    /** Shown on touch devices only, where the drag is a long press rather than a drag */
+    touchDragHint: '长按卡片可拖动归档（也可用卡片上的分类下拉）。',
     aiWrite: 'AI 著书',
     import: '导入',
     loadFailed: (msg: string) => `内容清单加载失败：${msg}`,

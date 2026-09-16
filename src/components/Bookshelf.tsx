@@ -1,5 +1,6 @@
 // The shelf: every course and book, grouped by user-created categories.
-// Cards can be dragged between categories, with a cover-style drag ghost.
+// Cards can be dragged between categories — with a mouse through the platform's
+// own drag-and-drop, with a finger through the long-press in useTouchDrag.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { DragEvent as ReactDragEvent } from 'react'
 import { Link } from 'react-router-dom'
@@ -9,12 +10,17 @@ import type { CourseMeta } from '../types/course'
 import { COURSE_DND_MIME, UNCATEGORIZED, groupCourses, useCategoryStore } from '../store/categoryStore'
 import { useI18n } from '../i18n'
 import type { Dict } from '../i18n/zh'
+import { isTouchDevice } from '../platform'
 import { SettingsDialog } from './SettingsDialog'
 import { ImportDialog } from './ImportDialog'
 import { ThemeToggle } from './ThemeToggle'
 import { InstallPrompt } from '../pwa/InstallPrompt'
 import { onCourseCreated, useGenerateStore } from '../generate/generateStore'
 import { GenerateBadge } from './GenerateBadge'
+import { useTouchDrag } from './common/useTouchDrag'
+
+/** Marks a category block as a drop target for the touch drag (HTML5 DnD uses its own events) */
+const DROP_ATTR = 'data-drop-category'
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c)
@@ -62,6 +68,9 @@ function CourseCard({
   meta,
   categories,
   current,
+  touch,
+  dragging,
+  dragProps,
   onDelete,
   onAssign,
   onRename,
@@ -71,6 +80,11 @@ function CourseCard({
   categories: string[]
   /** Current category (empty string = uncategorised) */
   current: string
+  /** Touch devices have no HTML5 drag-and-drop, so the pointer handlers stand in for it */
+  touch: boolean
+  /** This card is the one currently lifted by a touch drag */
+  dragging: boolean
+  dragProps: (id: string) => Record<string, unknown>
   onDelete: () => void
   onAssign: (category: string) => void
   onRename: (title: string) => Promise<void>
@@ -95,8 +109,16 @@ function CourseCard({
 
   return (
     <div
+      {...dragProps(meta.id)}
+      // Left on even for touch: it costs nothing there (no browser fires dragstart
+      // from a finger) and a touchscreen laptop still needs it for its mouse
       draggable
       onDragStart={(e) => {
+        // If a long press already owns the gesture, a native drag must not pile on top
+        if (dragging) {
+          e.preventDefault()
+          return
+        }
         e.dataTransfer.setData(COURSE_DND_MIME, meta.id)
         e.dataTransfer.effectAllowed = 'move'
         // Fill the ghost and hand it over as the drag image. It has to be already
@@ -110,8 +132,10 @@ function CourseCard({
       onDragEnd={() => {
         if (ghostRef.current) ghostRef.current.innerHTML = ''
       }}
-      className="group relative flex flex-col border border-ink/15 bg-paper-deep/40 p-4 shadow-paper transition
-        hover:-translate-y-0.5 hover:border-cinnabar/50 hover:bg-paper-deep sm:p-5"
+      className={`group relative flex flex-col border border-ink/15 bg-paper-deep/40 p-4 shadow-paper transition
+        hover:-translate-y-0.5 hover:border-cinnabar/50 hover:bg-paper-deep sm:p-5
+        ${dragging ? 'opacity-40' : ''}
+        ${touch ? 'select-none [-webkit-touch-callout:none]' : ''}`}
     >
       <div ref={ghostRef} aria-hidden style={{ position: 'fixed', top: -9999, left: -9999, pointerEvents: 'none' }} />
       {renaming ? (
@@ -249,6 +273,9 @@ export default function Bookshelf() {
   const [dropTarget, setDropTarget] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState('')
+  /** Fixed for the life of the page: a device does not gain or lose a finger */
+  const [touch] = useState(isTouchDevice)
+  const touchGhostRef = useRef<HTMLDivElement>(null)
 
   const refresh = useCallback(() => {
     listAllCourses()
@@ -286,6 +313,8 @@ export default function Bookshelf() {
   }
 
   const dropProps = (name: string) => ({
+    // Marks the block for the touch drag's hit test; the HTML5 path uses its own events
+    [DROP_ATTR]: name,
     onDragOver: (e: ReactDragEvent) => {
       e.preventDefault()
       e.dataTransfer.dropEffect = 'move'
@@ -295,8 +324,46 @@ export default function Bookshelf() {
     onDrop: (e: ReactDragEvent) => onDropTo(e, name),
   })
 
+  // ── Touch dragging ──────────────────────────────────────────────────────────
+  // A finger cannot start the platform's drag-and-drop at all, so holding a card
+  // lifts it instead. Everything here is inert on a mouse, which keeps the path above.
+  const categoryAt = (x: number, y: number): string | null => {
+    // The ghost rides under the finger, so it has to be transparent to hit-testing
+    // (pointer-events: none) or this would find the ghost every time
+    const el = document.elementFromPoint(x, y) as HTMLElement | null
+    return el?.closest(`[${DROP_ATTR}]`)?.getAttribute(DROP_ATTR) ?? null
+  }
+
+  const drag = useTouchDrag({
+    onStart: (id) => {
+      const meta = (courses ?? []).find((c) => c.id === id)
+      const ghost = touchGhostRef.current
+      if (ghost && meta) ghost.innerHTML = ghostHTML(meta, t)
+    },
+    onMove: (_id, x, y) => {
+      const ghost = touchGhostRef.current
+      if (ghost) ghost.style.transform = `translate3d(${x}px, ${y}px, 0)`
+      const name = categoryAt(x, y)
+      setDropTarget((cur) => (cur === name ? cur : name))
+    },
+    onDrop: (id, x, y) => {
+      const name = categoryAt(x, y)
+      setDropTarget(null)
+      if (touchGhostRef.current) touchGhostRef.current.innerHTML = ''
+      // Let go over empty space → leave the card where it was
+      if (name) assignTo(id, name === UNCATEGORIZED ? '' : name)
+    },
+  })
+
   return (
     <main className="min-h-screen bg-paper py-10 text-ink pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] sm:py-14 sm:pl-[max(1.5rem,env(safe-area-inset-left))] sm:pr-[max(1.5rem,env(safe-area-inset-right))]">
+      {/* Follows the finger during a touch drag; pointer-events: none keeps it out of the hit test */}
+      <div
+        ref={touchGhostRef}
+        aria-hidden
+        className="pointer-events-none fixed left-0 top-0 z-50 -ml-[68px] -mt-[76px]"
+        style={{ transform: 'translate3d(-9999px, -9999px, 0)' }}
+      />
       <div className="mx-auto max-w-5xl">
         <header className="flex flex-col gap-5 border-b border-ink/15 pb-6 sm:flex-row sm:items-end sm:justify-between sm:gap-6 sm:pb-8">
           <div>
@@ -305,6 +372,7 @@ export default function Bookshelf() {
               {t.app.name}
             </h1>
             <p className="mt-3 max-w-xl text-sm leading-7 text-ink-soft sm:mt-4">{t.shelf.tagline}</p>
+            {touch && <p className="mt-1 text-xs leading-6 text-ink-faint">{t.shelf.touchDragHint}</p>}
           </div>
           <div className="flex flex-wrap items-center gap-2 sm:justify-end sm:gap-4">
             <button
@@ -395,6 +463,9 @@ export default function Bookshelf() {
                           meta={c}
                           categories={order}
                           current={assign[c.id] ?? ''}
+                          touch={touch}
+                          dragging={drag.draggingId === c.id}
+                          dragProps={drag.dragProps}
                           onDelete={() => {
                             void deleteCourse(c.id).then(refresh)
                           }}
