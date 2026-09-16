@@ -1,10 +1,11 @@
-// 课件导出：枚举全部文件 → 并上划词标注/问答 → fflate zip → 浏览器下载 {title}.zip
+// Course export: enumerate every file → add the highlights and Q&A → fflate zip → browser download of {title}.zip
 import { strToU8, zipSync } from 'fflate'
 import type { CourseMeta } from '../types/course'
 import { storeFor } from '../course'
 import { isNative } from '../platform'
 import { NOTES_FILE } from './notes'
 import { notesForExport } from './notesDb'
+import { tr } from '../i18n'
 
 function downloadBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob)
@@ -14,11 +15,11 @@ function downloadBlob(blob: Blob, filename: string): void {
   document.body.appendChild(a)
   a.click()
   a.remove()
-  // Safari 需等点击完成后再回收
+  // Safari needs the click to finish before the URL is revoked
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
-/** ArrayBuffer → base64（分块拼，避免 String.fromCharCode 参数过多爆栈） */
+/** ArrayBuffer → base64 (assembled in chunks, so String.fromCharCode never gets enough arguments to blow the stack) */
 async function blobToBase64(blob: Blob): Promise<string> {
   const bytes = new Uint8Array(await blob.arrayBuffer())
   const CHUNK = 0x8000
@@ -30,12 +31,14 @@ async function blobToBase64(blob: Blob): Promise<string> {
 }
 
 /**
- * 把 zip 交出去。
+ * Hand the zip over.
  *
- * 原生壳里 `<a download>` 是不会触发下载的（WebView 没有浏览器的下载管理器），
- * 得先写进应用缓存目录，再交给系统分享面板——用户可以存到「文件」、发给别人，
- * 或转存到网盘。目录必须是 Directory.Cache：Capacitor 的 Share 走 FileProvider，
- * 只认 cache / files 这两个目录下的文件。
+ * Inside the native shell `<a download>` does not trigger a download (a WebView has
+ * no browser download manager), so the file is written into the app's cache
+ * directory and handed to the system share sheet — the user can save it to Files,
+ * send it to someone, or upload it to cloud storage. The directory has to be
+ * Directory.Cache: Capacitor's Share goes through a FileProvider, which will only
+ * serve files under cache / files.
  */
 async function saveBlob(blob: Blob, filename: string): Promise<void> {
   if (!isNative) {
@@ -51,17 +54,17 @@ async function saveBlob(blob: Blob, filename: string): Promise<void> {
     data: await blobToBase64(blob),
     directory: Directory.Cache,
   })
-  await Share.share({ title: filename, url: uri, dialogTitle: '导出课件' })
+  await Share.share({ title: filename, url: uri, dialogTitle: tr().io.exportShare })
 }
 
 export interface ExportResult {
-  /** 因故跳过的课件文件数 */
+  /** Course files skipped for some reason */
   missing: number
-  /** 随包带走的划词标注条数 */
+  /** Highlights travelling with the archive */
   notes: number
 }
 
-/** 打包下载整本书；笔记（划词标注 + 问答）作为 moxue-notes.json 一并带走 */
+/** Zip the whole book for download; the notes (highlights + Q&A) travel along as moxue-notes.json */
 export async function exportCourseZip(meta: CourseMeta): Promise<ExportResult> {
   const store = storeFor(meta.source)
   const files: Record<string, Uint8Array> = {}
@@ -74,8 +77,8 @@ export async function exportCourseZip(meta: CourseMeta): Promise<ExportResult> {
     }
     files[path] = strToU8(text)
   }
-  if (Object.keys(files).length === 0) throw new Error('课件内没有可导出的文件')
-  // 笔记与内容分开取：笔记读失败不该让整次导出失败（内容才是主体）
+  if (Object.keys(files).length === 0) throw new Error(tr().io.exportEmpty)
+  // Notes and content are fetched separately: failing to read the notes must not fail the whole export (the content is the point)
   let notes = 0
   try {
     const bundle = await notesForExport(meta)
@@ -84,7 +87,7 @@ export async function exportCourseZip(meta: CourseMeta): Promise<ExportResult> {
       notes = bundle.annotations.length
     }
   } catch (e) {
-    console.warn('[moxue] 笔记打包失败，仅导出课件内容', e)
+    console.warn('[moxue] could not pack the notes; exporting the course content only', e)
   }
   const blob = new Blob([zipSync(files)], { type: 'application/zip' })
   const safeName = meta.title.replace(/[\\/:*?"<>|]/g, '_') || 'course'

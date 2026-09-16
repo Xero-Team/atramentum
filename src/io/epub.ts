@@ -1,6 +1,7 @@
-// EPUB 解包：zip → container.xml → OPF → spine 顺序 → 各章正文 HTML（净化裁剪为纯阅读标签）
+// Unpacking an EPUB: zip → container.xml → OPF → spine order → each chapter's body HTML (sanitised down to read-only tags)
 import { strFromU8, unzipSync } from 'fflate'
 import DOMPurify from 'dompurify'
+import { tr } from '../i18n'
 
 export interface EpubChapter {
   title: string
@@ -14,7 +15,7 @@ const ALLOWED_TAGS = [
   'span', 'div', 'section', 'article', 'figure', 'figcaption', 'sup', 'sub', 'ruby', 'rt', 'rb',
 ]
 
-/** 相对 href 解析（处理 ../ 与百分号编码） */
+/** Resolve a relative href (handling ../ and percent-encoding) */
 function resolvePath(baseDir: string, href: string): string {
   const segs = decodeURIComponent(href.replace(/^\.\//, '')).split('/')
   const out: string[] = []
@@ -31,7 +32,7 @@ export async function epubToChapters(file: File): Promise<{ title: string; chapt
   try {
     zip = unzipSync(new Uint8Array(await file.arrayBuffer()))
   } catch {
-    throw new Error('EPUB 解包失败：文件可能已损坏。')
+    throw new Error(tr().io.epubUnpack)
   }
   const get = (path: string): string | null => {
     const key = Object.keys(zip).find((k) => k.toLowerCase() === path.toLowerCase())
@@ -39,13 +40,13 @@ export async function epubToChapters(file: File): Promise<{ title: string; chapt
   }
 
   const container = get('META-INF/container.xml')
-  if (!container) throw new Error('不是有效的 EPUB：缺少 container.xml')
+  if (!container) throw new Error(tr().io.epubNoContainer)
   const opfPath = new DOMParser().parseFromString(container, 'application/xml')
     .querySelector('rootfile')
     ?.getAttribute('full-path')
-  if (!opfPath) throw new Error('EPUB 结构异常：找不到 OPF 清单')
+  if (!opfPath) throw new Error(tr().io.epubNoOpf)
   const opfText = get(opfPath)
-  if (!opfText) throw new Error('EPUB 结构异常：OPF 文件缺失')
+  if (!opfText) throw new Error(tr().io.epubNoOpfFile)
 
   const opf = new DOMParser().parseFromString(opfText, 'application/xml')
   const bookTitle =
@@ -76,13 +77,13 @@ export async function epubToChapters(file: File): Promise<{ title: string; chapt
 
     const head =
       body.querySelector('h1,h2,h3,h4')?.textContent?.trim() || xdoc.title?.trim() || ''
-    const title = head.replace(/\s+/g, ' ').slice(0, 60) || `第 ${chapters.length + 1} 节`
+    const title = head.replace(/\s+/g, ' ').slice(0, 60) || tr().io.epubUntitledSection(chapters.length + 1)
     const html = DOMPurify.sanitize(body.innerHTML, {
       ALLOWED_TAGS,
       ALLOWED_ATTR: ['colspan', 'rowspan'],
     })
     chapters.push({ title, html })
   }
-  if (chapters.length === 0) throw new Error('EPUB 内未解析出文本章节（可能全是图片版扫描页）')
+  if (chapters.length === 0) throw new Error(tr().io.epubNoText)
   return { title: bookTitle, chapters }
 }

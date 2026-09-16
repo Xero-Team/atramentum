@@ -1,7 +1,8 @@
 /**
- * 导入管线：任意来源（zip / tar.gz / rar / 文件夹拖拽）→ 归一化 RawEntry[] →
- * 过滤清洗 → 解码文本 → 整课写入 Dexie（source: imported）。
- * 白名单与 scripts/bundle-courses.mjs 保持一致（纯文本扩展名）。
+ * Import pipeline: any source (zip / tar.gz / rar / a dragged folder) → normalised
+ * RawEntry[] → filtered and cleaned → decoded to text → written to Dexie as one
+ * course (source: imported).
+ * The whitelist is kept in step with scripts/bundle-courses.mjs (text extensions).
  */
 import { gunzipSync, unzipSync } from 'fflate'
 import type { CourseFormat, CourseMeta } from '../types/course'
@@ -9,17 +10,18 @@ import { saveCourse } from '../course/dbStore'
 import { untarSync, type TarEntry } from './tar'
 import { epubToChapters } from './epub'
 import { pdfToPages } from './pdf'
+import { tr } from '../i18n'
 
 export interface RawEntry {
-  /** posix 相对路径 */
+  /** posix relative path */
   path: string
   data: Uint8Array
 }
 
-/** 随书导出的划词标注文件（见 io/notes.ts）：识别它以便复原笔记，且绝不当课件内容入库 */
+/** The highlights file exported alongside a course (see io/notes.ts): recognised so the notes can be restored, and never ingested as course content */
 export const NOTES_FILE = 'moxue-notes.json'
 
-// 与 bundle 脚本同款白名单；全部按 UTF-8 文本解码入库
+// Same whitelist as the bundle script; everything is decoded as UTF-8 text
 const INCLUDE_EXT = new Set([
   '.md', '.txt', '.c', '.h', '.cpp', '.hpp', '.rs', '.toml', '.json',
   '.yaml', '.yml', '.csv', '.cfg', '.sh', '.py', '.S', '.asm', '.mk',
@@ -28,12 +30,12 @@ const INCLUDE_EXT = new Set([
 const EXCLUDE_PARTS = new Set(['.git', '.claude', 'target', '__pycache__', '__MACOSX'])
 const MAX_FILE = 2 * 1024 * 1024
 
-/* ───────── 各来源 → RawEntry[] ───────── */
+/* ───────── Each source → RawEntry[] ───────── */
 
 export function fromZip(u8: Uint8Array): RawEntry[] {
   const files = unzipSync(u8)
   return Object.entries(files)
-    .filter(([path]) => !path.endsWith('/')) // 目录条目跳过
+    .filter(([path]) => !path.endsWith('/')) // skip directory entries
     .map(([path, data]) => ({ path: path.replace(/\\/g, '/'), data }))
 }
 
@@ -42,24 +44,27 @@ export function fromTarGz(u8: Uint8Array): RawEntry[] {
   return entries.map((e) => ({ path: e.name.replace(/\\/g, '/'), data: e.data }))
 }
 
-/** RAR（v4/v5）/7z 等：libarchive.js 动态加载，worker + wasm 来自 public/libarchive/ */
+/** RAR (v4/v5) / 7z and friends: libarchive.js is loaded lazily; worker + wasm come from public/libarchive/ */
 export async function fromRar(file: File): Promise<RawEntry[]> {
   let Archive: (typeof import('libarchive.js'))['Archive']
   try {
     ;({ Archive } = await import('libarchive.js'))
   } catch {
-    throw new Error('rar 解析组件加载失败，请重试，或将压缩包解压后拖入文件夹 / 改用 zip。')
+    throw new Error(tr().io.rarLoadFailed)
   }
   Archive.init({ workerUrl: `${import.meta.env.BASE_URL}libarchive/worker-bundle.js` })
   let archive: Awaited<ReturnType<typeof Archive.open>>
   try {
     archive = await Archive.open(file)
     if ((await archive.hasEncryptedData()) === true) {
-      throw new Error('该压缩包已加密，请先解密后再导入。')
+      throw new Error(tr().io.rarEncrypted)
     }
   } catch (e) {
     const text = (e as Error)?.message ?? String(e)
-    throw new Error(/加密/.test(text) ? text : `rar 解析失败：${text.slice(0, 120)}。可改用 zip 或拖入已解压的文件夹。`)
+    // libarchive reports encryption in its own (Chinese) wording; map that onto
+    // our own message so the English UI never shows the library's text
+    if (/加密|encrypt/i.test(text)) throw new Error(tr().io.rarEncrypted)
+    throw new Error(tr().io.rarFailed(text.slice(0, 120)))
   }
   const tree = await archive.extractFiles()
   const out: RawEntry[] = []
@@ -76,7 +81,7 @@ export async function fromRar(file: File): Promise<RawEntry[]> {
   return out
 }
 
-/** 文件夹拖拽 / 多选文件 → RawEntry[]（用 webkitRelativePath / entry 树还原目录结构） */
+/** A dragged folder / several chosen files → RawEntry[] (the directory structure is rebuilt from webkitRelativePath or the entry tree) */
 export async function fromFiles(items: File[] | DataTransferItemList): Promise<RawEntry[]> {
   const out: RawEntry[] = []
   const readFile = async (f: File, path: string) => {
@@ -98,7 +103,7 @@ export async function fromFiles(items: File[] | DataTransferItemList): Promise<R
       } else if (entry.isDirectory) {
         const reader = (entry as FileSystemDirectoryEntry).createReader()
         for (;;) {
-          // readEntries 每次最多返回 100 条，需循环取尽
+          // readEntries returns at most 100 at a time, so keep looping until it is drained
           const batch = await new Promise<FileSystemEntry[]>((res) =>
             reader.readEntries((es) => res(es), () => res([])),
           )
@@ -117,7 +122,7 @@ export async function fromFiles(items: File[] | DataTransferItemList): Promise<R
   return out
 }
 
-/* ───────── 归一化 + 清洗 ───────── */
+/* ───────── Normalising and cleaning ───────── */
 
 function isJunk(path: string): boolean {
   const parts = path.split('/')
@@ -134,7 +139,7 @@ function allowedExt(path: string): boolean {
   return INCLUDE_EXT.has(ext)
 }
 
-/** 若全部条目共享同一个「文件夹根」（无扩展名），剥掉它——压缩整门课的包常见此形态 */
+/** When every entry shares one "folder root" (no extension), strip it — the usual shape of an archived course */
 export function stripCommonRoot(entries: RawEntry[]): RawEntry[] {
   if (entries.length === 0) return entries
   const first = entries[0].path.split('/')[0]
@@ -143,7 +148,7 @@ export function stripCommonRoot(entries: RawEntry[]): RawEntry[] {
   return allShare ? entries.map((e) => ({ ...e, path: e.path.slice(first.length + 1) })) : entries
 }
 
-/** 清洗：去垃圾/越白名单/超大文件，转文本 */
+/** Cleaning: drop junk, anything off the whitelist and oversized files; decode to text */
 export function normalizeEntries(entries: RawEntry[]): { path: string; text: string }[] {
   const cleaned = stripCommonRoot(
     entries.filter((e) => e.path && !isJunk(e.path) && allowedExt(e.path) && e.data.length <= MAX_FILE),
@@ -153,8 +158,10 @@ export function normalizeEntries(entries: RawEntry[]): { path: string; text: str
 }
 
 /**
- * 摘出随书导出的标注文件：先取走 moxue-notes.json，其余照常入课件。
- * 必须摘——否则它会作为一篇「课时」混进目录树（json 在白名单里）。
+ * Pull out the highlights file exported alongside a course: take moxue-notes.json
+ * aside and treat the rest as course content as usual.
+ * It has to be pulled out — json is on the whitelist, so otherwise it would slip
+ * into the tree as a "lesson".
  */
 export function splitNotesEntry(entries: RawEntry[]): { entries: RawEntry[]; notesRaw: string | null } {
   const idx = entries.findIndex((e) => (e.path.split('/').pop() ?? '') === NOTES_FILE)
@@ -168,9 +175,9 @@ export function splitNotesEntry(entries: RawEntry[]): { entries: RawEntry[]; not
   return { entries: entries.filter((_, i) => i !== idx), notesRaw }
 }
 
-/* ───────── 标题推断 ───────── */
+/* ───────── Guessing the title ───────── */
 
-/** 文件名 → 课件标题：取末段、去扩展名（含 .tar.gz）、去数字前缀、分隔符转空格 */
+/** File name → course title: take the last segment, drop the extension (.tar.gz included), drop a numeric prefix, turn separators into spaces */
 export function titleFromFileName(name: string): string {
   const base = name.replace(/\\/g, '/').split('/').pop() ?? ''
   return base
@@ -181,7 +188,7 @@ export function titleFromFileName(name: string): string {
     .trim()
 }
 
-/** 目录/多文件导入推断标题：全部共享无扩展名根目录 → 用目录名；否则用首个文件名 */
+/** Title for a folder / multi-file import: when everything shares one extension-less root directory use its name, otherwise the first file's */
 export function guessCourseTitle(entries: RawEntry[]): string {
   const cleaned = entries.filter(
     (e) => e.path && !isJunk(e.path) && allowedExt(e.path) && (e.path.split('/').pop() ?? '') !== NOTES_FILE,
@@ -193,14 +200,14 @@ export function guessCourseTitle(entries: RawEntry[]): string {
   return titleFromFileName(cleaned[0]?.path ?? '')
 }
 
-/* ───────── 入库 ───────── */
+/* ───────── Storing ───────── */
 
 export interface IngestResult {
   meta: CourseMeta
   fileCount: number
 }
 
-/** 由文件构成推断格式：仅 html → epub；仅 txt → pdf；否则 md */
+/** Infer the format from what the files are: html only → epub; txt only → pdf; otherwise md */
 function detectFormat(files: { path: string }[]): CourseFormat {
   const has = (re: RegExp) => files.some((f) => re.test(f.path))
   if (has(/\.(html?)$/i) && !has(/\.md$/i)) return 'epub'
@@ -208,7 +215,7 @@ function detectFormat(files: { path: string }[]): CourseFormat {
   return 'md'
 }
 
-/** 归一化后的文件集整课入库（imported / generated 通用） */
+/** Store a normalised file set as one course (shared by imported and generated) */
 export async function ingestCourse(
   files: { path: string; text: string }[],
   opts: {
@@ -219,18 +226,19 @@ export async function ingestCourse(
     format?: CourseFormat
   },
 ): Promise<IngestResult> {
-  if (files.length === 0) throw new Error('没有可用的课件文件（仅支持文本类文件，单个不超过 2MB）')
+  if (files.length === 0) throw new Error(tr().io.noFiles)
   const id = `c-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
   const docCount = files.filter((f) => /\.(md|html?|txt)$/i.test(f.path)).length
-  const title = (opts.title ?? '').trim() || '未命名课件'
+  const title = (opts.title ?? '').trim() || tr().io.untitled
   const meta: CourseMeta = {
     id,
     title,
-    seal: [...title][0] || '课',
+    seal: [...title][0] || [...tr().io.untitled][0],
     desc: opts.desc ?? '',
     kind: docCount > 1 ? 'dir' : 'single',
     fileCount: files.length,
     files: files.map((f) => f.path),
+    // Stored only; the shelf groups by the category store's assignment, not this
     category: opts.category?.trim() || '学习',
     format: opts.format ?? detectFormat(files),
     source: opts.source,
@@ -239,13 +247,13 @@ export async function ingestCourse(
   return { meta, fileCount: files.length }
 }
 
-/* ───────── 书籍入库（EPUB / PDF） ───────── */
+/* ───────── Storing a book (EPUB / PDF) ───────── */
 
 function bookIndexMd(title: string, rows: { title: string; href: string }[]): string {
   return [
     `# ${title}`,
     '',
-    '| # | 章节 |',
+    tr().io.chapterColumns,
     '|---|------|',
     ...rows.map((r, i) => `| ${String(i + 1).padStart(2, '0')} | [${r.title}](${r.href}) |`),
     '',
@@ -254,7 +262,7 @@ function bookIndexMd(title: string, rows: { title: string; href: string }[]): st
 
 const pad2 = (n: number): string => String(n).padStart(2, '0')
 
-/** EPUB → 章节化书籍入库；titleOverride 覆盖元数据书名（目录仍用元数据书名） */
+/** EPUB → store as a chaptered book; titleOverride replaces the metadata title (the index still uses the metadata title) */
 export async function ingestBookFromEpub(file: File, category: string, titleOverride?: string): Promise<IngestResult> {
   const { title, chapters } = await epubToChapters(file)
   const display = (titleOverride ?? '').trim() || title
@@ -268,25 +276,25 @@ export async function ingestBookFromEpub(file: File, category: string, titleOver
   return ingestCourse(files, {
     source: 'imported',
     title: display,
-    desc: `EPUB · ${chapters.length} 章`,
+    desc: tr().io.epubDesc(chapters.length),
     category,
     format: 'epub',
   })
 }
 
-/** PDF → 逐页文本书籍入库；titleOverride 覆盖文件名推断 */
+/** PDF → store as a book of per-page text; titleOverride replaces the title guessed from the file name */
 export async function ingestBookFromPdf(file: File, category: string, titleOverride?: string): Promise<IngestResult> {
   const { pages } = await pdfToPages(file)
   const title =
     (titleOverride ?? '').trim() ||
     titleFromFileName(file.name) ||
-    '未命名 PDF'
+    tr().io.untitledPdf
   const files = [
     {
       path: 'INDEX.md',
       text: bookIndexMd(
         title,
-        pages.map((_, i) => ({ title: `第 ${i + 1} 页`, href: `pdf/p${pad2(i + 1)}.txt` })),
+        pages.map((_, i) => ({ title: tr().io.page(i + 1), href: `pdf/p${pad2(i + 1)}.txt` })),
       ),
     },
     ...pages.map((t, i) => ({ path: `pdf/p${pad2(i + 1)}.txt`, text: t })),
@@ -294,7 +302,7 @@ export async function ingestBookFromPdf(file: File, category: string, titleOverr
   return ingestCourse(files, {
     source: 'imported',
     title,
-    desc: `PDF · ${pages.length} 页`,
+    desc: tr().io.pdfDesc(pages.length),
     category,
     format: 'pdf',
   })

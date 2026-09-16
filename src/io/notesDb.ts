@@ -1,13 +1,13 @@
 /**
- * 笔记随书走（读写库部分）：收集本书标注/问答 → 打包；把包复原到某本书。
- * 纯逻辑（打包格式、解析、书名匹配）在 notes.ts。
+ * Notes travel with the book (the database side): collect a book's highlights and Q&A and pack them; restore a pack onto a book.
+ * The pure logic (pack format, parsing, matching by title) lives in notes.ts.
  */
 import type { CourseMeta } from '../types/course'
 import { bulkPutNotes, clearAnnotations, listAnnotations, listThreads } from '../course/dbStore'
 import { buildNotesBundle, rebindNotes } from './notes'
 import type { NotesBundle } from '../ask/types'
 
-/** 组装导出内容（无标注无问答时返回 null，导出 zip 里就不出现这个文件） */
+/** Assemble the export payload (null when there are no highlights or conversations, so the file never appears in the zip) */
 export async function collectNotes(meta: CourseMeta): Promise<NotesBundle | null> {
   const [annotations, threads] = await Promise.all([listAnnotations(meta.id), listThreads(meta.id)])
   if (annotations.length === 0 && threads.length === 0) return null
@@ -21,8 +21,9 @@ export interface NotesImportResult {
 }
 
 /**
- * 把标注包复原到某本书。先清空本书旧标注再写入——
- * 重复导入同一份包得到的结果与导入一次相同，不会叠加两份。
+ * Restore a highlights pack onto a book. The book's existing highlights are cleared
+ * first: importing the same pack twice gives the same result as importing it once,
+ * rather than doubling everything up.
  */
 export async function restoreNotes(bundle: NotesBundle, meta: CourseMeta): Promise<NotesImportResult> {
   const { annotations, threads } = rebindNotes(bundle, meta.id)
@@ -31,7 +32,7 @@ export async function restoreNotes(bundle: NotesBundle, meta: CourseMeta): Promi
   return { annotations: annotations.length, threads: threads.length }
 }
 
-/** 导出用：把本书的标注与问答打包（内置课件的标注一样带走，导入后落到副本上） */
+/** For export: pack this book's highlights and conversations (highlights on a built-in course travel too, landing on the copy once imported) */
 export async function notesForExport(meta: CourseMeta): Promise<NotesBundle | null> {
   return collectNotes(meta)
 }

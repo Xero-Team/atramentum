@@ -1,4 +1,4 @@
-// PDF 逐页文本抽取（pdfjs-dist 懒加载，worker 走 ?url 资产；仅取文本，不渲染位图）
+// Per-page PDF text extraction (pdfjs-dist is loaded lazily and its worker comes in as a ?url asset; text only, no bitmap rendering)
 export async function pdfToPages(file: File): Promise<{ pages: string[] }> {
   const pdfjs = await import('pdfjs-dist')
   const worker = await import('pdfjs-dist/build/pdf.worker.min.mjs?url')
