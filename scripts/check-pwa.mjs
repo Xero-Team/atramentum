@@ -4,6 +4,8 @@
 // 【手动跑，不进 npm scripts / CI】需要本机有 Chrome，且先构建并起好预览服务：
 //   npm run build && npx vite preview --port 4173 --strictPort
 //   node scripts/check-pwa.mjs
+// 也可以直接验线上（HTTPS 才允许注册 SW）：
+//   node scripts/check-pwa.mjs https://atramentum.pages.dev/
 //
 // 为什么要留着它：Service Worker 一旦写错是会「粘住」的——用户下次进来直接白屏，
 // 而且清缓存前一直复现。这类问题只有真跑一遍断网才看得出来。
@@ -14,7 +16,7 @@ import { join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 
 const PORT = 9333
-const APP = 'http://localhost:4173/'
+const APP = process.argv[2] ?? 'http://localhost:4173/'
 const CHROME = [
   'C:/Program Files/Google/Chrome/Application/chrome.exe',
   'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
@@ -285,13 +287,22 @@ try {
   await sleep(400)
   check('窄屏下 ☰ 能打开课时目录抽屉', await evaluate(`!!document.querySelector('${tocSel}')`))
 
-  const clicked = await evaluate(`(() => {
-    const d = document.querySelector('${tocSel}'); if (!d) return false
-    const items = [...d.querySelectorAll('button')].filter(e => !e.getAttribute('aria-label') && e.textContent.trim())
-    if (items.length < 2) return false
-    items[items.length - 1].click()
-    return true
-  })()`)
+  // 等目录真的长出内容再点：课程树要等内置课件清单取回来才建出来，
+  // 线上有网络延迟，固定 sleep 会偶发地点到空抽屉
+  const titleBtns = `(() => {
+    const d = document.querySelector('${tocSel}'); if (!d) return 0
+    return [...d.querySelectorAll('button')].filter(e => !e.getAttribute('aria-label') && e.textContent.trim()).length
+  })()`
+  const drawerItems = await waitFor(() => evaluate(titleBtns), { label: '目录内容加载', tries: 30 }).catch(() => 0)
+
+  const clicked =
+    drawerItems >= 2 &&
+    (await evaluate(`(() => {
+      const d = document.querySelector('${tocSel}'); if (!d) return false
+      const items = [...d.querySelectorAll('button')].filter(e => !e.getAttribute('aria-label') && e.textContent.trim())
+      items[items.length - 1].click()
+      return true
+    })()`))
   await sleep(800)
   const hashAfter = await evaluate(`location.hash`)
   if (clicked) {
@@ -301,7 +312,7 @@ try {
       `${hashBefore} → ${hashAfter}`,
     )
   } else {
-    check('在目录里点课时（跳过：这门课只有一节，测不出跳转）', true)
+    check(`在目录里点课时（跳过：抽屉里只有 ${drawerItems} 项，测不出跳转）`, true)
   }
 } catch (e) {
   check(`执行出错：${e.message}`, false)
