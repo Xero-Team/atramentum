@@ -7,12 +7,17 @@ import { persist, createJSONStorage } from 'zustand/middleware'
 import type { AIProviderConfig } from '../types/ai'
 import { PRESET_ENDPOINTS } from '../types/ai'
 
+/** 外观：浅色 / 深色 / 跟随系统（实际换肤逻辑见 ./theme.ts） */
+export type ThemeMode = 'light' | 'dark' | 'system'
+
 interface SettingsState {
   ai: AIProviderConfig
   /** 关联的预置端点 id（自定义时为 'custom'） */
   presetId: string
+  theme: ThemeMode
   setAIPreset: (presetId: string) => void
   setAIConfig: (patch: Partial<AIProviderConfig>) => void
+  setTheme: (theme: ThemeMode) => void
 }
 
 const defaultPreset = PRESET_ENDPOINTS[0] // DeepSeek：国内可用性最好，作为默认
@@ -27,6 +32,7 @@ export const useSettingsStore = create<SettingsState>()(
         model: defaultPreset.defaultModel,
       },
       presetId: defaultPreset.id,
+      theme: 'light',
       setAIPreset: (presetId) => {
         const p = PRESET_ENDPOINTS.find((e) => e.id === presetId) ?? defaultPreset
         set({
@@ -40,6 +46,7 @@ export const useSettingsStore = create<SettingsState>()(
         })
       },
       setAIConfig: (patch) => set((s) => ({ ai: { ...s.ai, ...patch } })),
+      setTheme: (theme) => set({ theme }),
     }),
     {
       name: 'moxue-settings',

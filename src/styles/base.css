@@ -2,14 +2,82 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ============================================================
+   主题色板
+   色值一律写成 "R G B" 三元组，Tailwind 端用 rgb(var(--x) / <alpha-value>)
+   包起来，这样 border-ink/15 这类透明度修饰符才不会失效。
+   浅色 = 宣纸朱砂（原样保留）；深色 = 水墨青，青代替朱砂作为强调色。
+   ============================================================ */
 @layer base {
+  :root {
+    /* 浅色 · 宣纸朱砂 */
+    --c-paper: 245 241 232; /* #f5f1e8 宣纸 */
+    --c-paper-deep: 234 228 214; /* #eae4d6 陈纸 */
+    --c-paper-edge: 220 211 192; /* #dcd3c0 纸边 */
+    --c-ink: 43 42 38; /* #2b2a26 墨 */
+    --c-ink-soft: 87 83 78; /* #57534e 淡墨 */
+    --c-ink-faint: 138 133 120; /* #8a8578 焦墨 */
+    --c-cinnabar: 192 63 43; /* #c03f2b 朱砂 */
+    --c-cinnabar-deep: 168 51 31; /* #a8331f 朱砂(重) */
+    --c-scrim: 43 42 38; /* 遮罩 */
+
+    /* 语义槽位：不进 Tailwind，只给 CSS 用 */
+    --c-code-bg: 38 37 31; /* #26251f 代码墨池 */
+    --c-code-ink: 232 228 216; /* #e8e4d8 */
+    --c-ascii-bg: 239 233 220; /* #efe9dc 碑刻底 */
+    --c-select-bg: 192 63 43;
+    --c-select-ink: 245 241 232;
+    --c-mark: 192 63 43;
+    --c-mark-alpha: 0.16;
+    --c-mark-line: 192 63 43;
+
+    --shadow-paper: 0 1px 2px rgb(43 42 38 / 0.06), 0 8px 24px rgb(43 42 38 / 0.06);
+    --shadow-seal: inset 0 0 0 1.5px rgb(192 63 43 / 0.85);
+
+    color-scheme: light;
+  }
+
+  /* 用 :root[...] 而不是裸 [data-theme]：与上面的 :root 同特异性时只能靠顺序取胜，
+     这里抬高一档，免得以后有人挪动块的位置就把深色主题弄失效 */
+  :root[data-theme='dark'] {
+    /* 深色 · 水墨青：夜墨底、宣纸白字、青作强调 */
+    --c-paper: 16 21 24; /* #101518 */
+    --c-paper-deep: 26 33 37; /* #1a2125 略提亮，当侧栏/浮层底 */
+    --c-paper-edge: 45 56 61; /* #2d383d */
+    --c-ink: 231 233 229; /* #e7e9e5 宣纸白 */
+    --c-ink-soft: 168 176 173; /* #a8b0ad */
+    --c-ink-faint: 122 133 131; /* #7a8583 */
+    --c-cinnabar: 95 176 168; /* #5fb0a8 青 */
+    --c-cinnabar-deep: 130 205 196; /* #82cdc4 青(亮)，深色下 hover 提亮 */
+    --c-scrim: 0 0 0;
+
+    --c-code-bg: 8 12 14; /* 比底色更沉，代码块读作一方墨池 */
+    --c-code-ink: 214 222 218;
+    --c-ascii-bg: 24 31 34; /* #181f22 */
+    --c-select-bg: 95 176 168;
+    --c-select-ink: 12 17 19;
+    --c-mark: 95 176 168;
+    --c-mark-alpha: 0.22;
+    --c-mark-line: 130 205 196;
+
+    --shadow-paper: 0 1px 2px rgb(0 0 0 / 0.5), 0 10px 28px rgb(0 0 0 / 0.45);
+    --shadow-seal: inset 0 0 0 1.5px rgb(95 176 168 / 0.8);
+
+    color-scheme: dark;
+  }
+
   html {
-    background: #f5f1e8;
+    /* 关键：别写死 #f5f1e8，否则深色下过卷（rubber-band）会闪白 */
+    background: rgb(var(--c-paper));
+  }
+
+  body {
+    color: rgb(var(--c-ink));
   }
 
   ::selection {
-    background: #c03f2b;
-    color: #f5f1e8;
+    background: rgb(var(--c-select-bg));
+    color: rgb(var(--c-select-ink));
   }
 }
 

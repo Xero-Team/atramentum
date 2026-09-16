@@ -18,6 +18,7 @@ import { extractAskContext } from '../ask/context'
 import type { Annotation, AskThread } from '../ask/types'
 import { deleteAnnotation, getThread, listAnnotationsForPath, saveAnnotation } from '../course/dbStore'
 import { SettingsDialog } from './SettingsDialog'
+import { ThemeToggle } from './ThemeToggle'
 import { exportCourseZip } from '../io/export'
 import { useCategoryStore } from '../store/categoryStore'
 import { onCourseCreated, onCourseUpdated, useGenerateStore } from '../generate/generateStore'
@@ -655,6 +656,7 @@ export default function Reader() {
             >
               设置
             </button>
+            <ThemeToggle />
             {prev && (
               <button
                 className="border border-ink/15 px-2.5 py-1 text-ink-soft transition hover:border-cinnabar/50 hover:text-cinnabar-deep"

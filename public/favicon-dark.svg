@@ -1,0 +1,6 @@
+<!-- 深色主题用的墨印。由 src/store/theme.ts 的 applyTheme() 换 link[rel=icon] 的 href 切过来；
+     favicon 是独立文档，看不到 <html data-theme>，所以只能靠 JS 换文件而不是 CSS 媒体查询。 -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="10" fill="#2b2a26"/>
+  <text x="32" y="42" text-anchor="middle" font-family="serif" font-weight="700" font-size="34" fill="#f5f1e8">墨</text>
+</svg>

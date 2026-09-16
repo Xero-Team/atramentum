@@ -8,6 +8,7 @@ import type { CourseMeta } from '../types/course'
 import { COURSE_DND_MIME, UNCATEGORIZED, groupCourses, useCategoryStore } from '../store/categoryStore'
 import { SettingsDialog } from './SettingsDialog'
 import { ImportDialog } from './ImportDialog'
+import { ThemeToggle } from './ThemeToggle'
 import { onCourseCreated, useGenerateStore } from '../generate/generateStore'
 import { GenerateBadge } from './GenerateBadge'
 
@@ -272,6 +273,7 @@ export default function Bookshelf() {
             >
               设 置
             </button>
+            <ThemeToggle />
             <div className="h-12 w-12 shrink-0 bg-cinnabar text-center font-song text-2xl font-bold leading-[3rem] text-paper shadow-seal">
               墨
             </div>

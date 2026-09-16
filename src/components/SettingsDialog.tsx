@@ -4,15 +4,24 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { PRESET_ENDPOINTS } from '../types/ai'
 import { chat, describeAIError, isAbortError, listModels } from '../ai/providers'
 import { useSettingsStore } from '../store/settingsStore'
+import type { ThemeMode } from '../store/settingsStore'
 import { Overlay } from './common/Overlay'
 
 const inputCls =
   'w-full border border-ink/20 bg-paper px-2.5 py-1.5 text-sm text-ink outline-none transition focus:border-cinnabar'
 
+const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
+  { value: 'light', label: '浅色' },
+  { value: 'dark', label: '深色' },
+  { value: 'system', label: '跟随系统' },
+]
+
 export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const ai = useSettingsStore((s) => s.ai)
   const setAIConfig = useSettingsStore((s) => s.setAIConfig)
   const setAIPreset = useSettingsStore((s) => s.setAIPreset)
+  const theme = useSettingsStore((s) => s.theme)
+  const setTheme = useSettingsStore((s) => s.setTheme)
 
   // 当前 baseURL 命中哪个预设；都没中即「自定义」
   const effectivePreset = useMemo(
@@ -91,13 +100,36 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   return (
     <Overlay onClose={onClose} closeOnOverlay={false}>
       <div className="flex items-center justify-between border-b border-ink/15 px-5 py-3">
-        <h2 className="font-song text-base font-bold tracking-wide">设置 · AI 接入</h2>
+        <h2 className="font-song text-base font-bold tracking-wide">设置</h2>
         <button className="text-ink-faint transition hover:text-cinnabar" onClick={onClose} aria-label="关闭">
           ✕
         </button>
       </div>
 
       <div className="max-h-[70vh] space-y-5 overflow-y-auto p-5">
+        <section>
+          <h3 className="mb-2 text-sm font-semibold text-ink">外观</h3>
+          <div className="flex gap-2">
+            {THEME_OPTIONS.map((o) => (
+              <button
+                key={o.value}
+                className={`flex-1 border px-3 py-2 text-xs transition sm:flex-none sm:px-5 ${
+                  theme === o.value
+                    ? 'border-cinnabar bg-cinnabar text-paper'
+                    : 'border-ink/20 text-ink-soft hover:border-cinnabar/50 hover:text-cinnabar-deep'
+                }`}
+                onClick={() => setTheme(o.value)}
+                aria-pressed={theme === o.value}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+          <p className="mt-1 text-xs text-ink-faint">
+            深色作水墨调：夜色般的墨底、宣纸白的字，青替朱砂作强调色。标题栏的 ☾ / ☀ 可随手切换。
+          </p>
+        </section>
+
         <section>
           <h3 className="mb-2 text-sm font-semibold text-ink">服务商预设</h3>
           <select

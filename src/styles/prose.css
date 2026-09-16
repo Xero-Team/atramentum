@@ -66,17 +66,22 @@
 
   /* 普通代码块 */
   .prose pre.code {
-    @apply my-5 overflow-x-auto rounded-md bg-[#26251f] p-4 font-mono text-[13px] leading-[1.7] text-[#e8e4d8];
+    @apply my-5 overflow-x-auto rounded-md p-4 font-mono text-[13px] leading-[1.7];
+    background: rgb(var(--c-code-bg));
+    color: rgb(var(--c-code-ink));
+    overscroll-behavior-x: contain;
   }
 
   /* ASCII 图：碑刻风——纸底、框线、等宽不折行、绝不染色 */
   .prose pre.ascii {
-    @apply my-5 overflow-x-auto rounded-sm border border-ink/25 bg-[#efe9dc] px-4 py-3
+    @apply my-5 overflow-x-auto rounded-sm border border-ink/25 px-4 py-3
       font-mono text-[13px] leading-[1.45] tracking-normal text-ink;
+    background: rgb(var(--c-ascii-bg));
     white-space: pre;
     word-break: normal;
     overflow-wrap: normal;
     tab-size: 4;
+    overscroll-behavior-x: contain;
   }
   .prose pre.ascii code {
     @apply bg-transparent p-0 font-mono text-inherit;
@@ -85,6 +90,7 @@
   /* 表格 */
   .prose .table-wrap {
     @apply my-5 overflow-x-auto;
+    overscroll-behavior-x: contain;
   }
   .prose table {
     @apply w-full min-w-max border-collapse text-[14px];
@@ -106,24 +112,50 @@
 }
 
 /* ── 划词标注（CSS Custom Highlight API：不动 DOM 上色） ──
-   与 ::selection 互不干扰：选区仍是朱红底白字，标注是淡朱底/朱红下划线 */
+   与 ::selection 互不干扰：选区仍是朱红底白字，标注是淡朱底/朱红下划线。
+   颜色走变量：::highlight() 吃不到 Tailwind 的 dark: 变体，只能读 var()。 */
 ::highlight(moxue-highlight) {
-  background-color: rgba(192, 63, 43, 0.16);
+  background-color: rgb(var(--c-mark) / var(--c-mark-alpha));
   color: inherit;
 }
 ::highlight(moxue-underline) {
   background-color: transparent;
   color: inherit;
-  text-decoration: underline 2px #c03f2b;
+  text-decoration: underline 2px rgb(var(--c-mark-line));
   text-underline-offset: 3px;
 }
 
-/* highlight.js 主题（暗底代码块用的最小子集，自绘） */.hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-section { color: #e0907a; }
-.hljs-string, .hljs-title, .hljs-name, .hljs-attr { color: #b8c98a; }
-.hljs-comment, .hljs-quote { color: #8a8778; font-style: italic; }
-.hljs-number, .hljs-symbol, .hljs-bullet { color: #d4b06a; }
-.hljs-function .hljs-title, .hljs-title.function_ { color: #9ab8d8; }
-.hljs-type, .hljs-class .hljs-title, .hljs-title.class_ { color: #d8c09a; }
-.hljs-built_in, .hljs-builtin-name { color: #c9a8d8; }
-.hljs-meta, .hljs-doctag { color: #8a8778; }
-.hljs-variable, .hljs-template-variable { color: #e8e4d8; }
+/* highlight.js 主题（暗底代码块用的最小子集，自绘）。
+   代码块深浅两色都是暗底，所以两套配色都得是「暗底上的亮字」；
+   深色主题换成水墨调：青作关键字、其余压成青灰，免得暖色块在墨色页面上跳出来。
+   写在这里而不是 base.css：跟用到它的规则放一起，改的时候不用两头找。 */
+:root {
+  --hl-keyword: #e0907a;
+  --hl-string: #b8c98a;
+  --hl-comment: #8a8778;
+  --hl-number: #d4b06a;
+  --hl-function: #9ab8d8;
+  --hl-type: #d8c09a;
+  --hl-builtin: #c9a8d8;
+  --hl-variable: #e8e4d8;
+}
+:root[data-theme='dark'] {
+  --hl-keyword: #7fd0cc;
+  --hl-string: #9cc7b4;
+  --hl-comment: #6d7a78;
+  --hl-number: #c4b184;
+  --hl-function: #8fb6c6;
+  --hl-type: #cbd6d2;
+  --hl-builtin: #b3a8c9;
+  --hl-variable: #d6ded9;
+}
+
+.hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-section { color: var(--hl-keyword); }
+.hljs-string, .hljs-title, .hljs-name, .hljs-attr { color: var(--hl-string); }
+.hljs-comment, .hljs-quote { color: var(--hl-comment); font-style: italic; }
+.hljs-number, .hljs-symbol, .hljs-bullet { color: var(--hl-number); }
+.hljs-function .hljs-title, .hljs-title.function_ { color: var(--hl-function); }
+.hljs-type, .hljs-class .hljs-title, .hljs-title.class_ { color: var(--hl-type); }
+.hljs-built_in, .hljs-builtin-name { color: var(--hl-builtin); }
+.hljs-meta, .hljs-doctag { color: var(--hl-comment); }
+.hljs-variable, .hljs-template-variable { color: var(--hl-variable); }
