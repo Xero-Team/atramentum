@@ -9,6 +9,7 @@ import { COURSE_DND_MIME, UNCATEGORIZED, groupCourses, useCategoryStore } from '
 import { SettingsDialog } from './SettingsDialog'
 import { ImportDialog } from './ImportDialog'
 import { ThemeToggle } from './ThemeToggle'
+import { InstallPrompt } from '../pwa/InstallPrompt'
 import { onCourseCreated, useGenerateStore } from '../generate/generateStore'
 import { GenerateBadge } from './GenerateBadge'
 
@@ -310,6 +311,9 @@ export default function Bookshelf() {
             </div>
           </div>
         </header>
+
+        {/* 装到桌面的引导：只放在书架，不去打扰正在读书的人 */}
+        <InstallPrompt />
 
         {error && (
           <p className="mt-10 border border-cinnabar/40 bg-cinnabar/5 px-4 py-3 text-sm text-cinnabar-deep">
