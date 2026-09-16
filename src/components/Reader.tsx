@@ -20,6 +20,7 @@ import { deleteAnnotation, getThread, listAnnotationsForPath, saveAnnotation } f
 import { SettingsDialog } from './SettingsDialog'
 import { ThemeToggle } from './ThemeToggle'
 import { Drawer } from './common/Drawer'
+import { useBackToClose } from './common/useBackToClose'
 import { exportCourseZip } from '../io/export'
 import { useCategoryStore } from '../store/categoryStore'
 import { useThemeToggle } from '../store/theme'
@@ -169,6 +170,9 @@ export default function Reader() {
     document.addEventListener('pointerdown', onDown)
     return () => document.removeEventListener('pointerdown', onDown)
   }, [menuOpen])
+
+  // 系统返回键先收 ⋯ 菜单
+  useBackToClose(menuOpen, () => setMenuOpen(false))
 
   /** 正文容器（mountMarkdown 挂载的 .prose / .book-text 根）；标注与划词上下文都基于它 */
   const getProseRoot = useCallback(() => {

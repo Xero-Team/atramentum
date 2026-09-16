@@ -11,6 +11,7 @@ import { extractAskContext } from './context'
 import type { AskThread } from './types'
 import { anchorFromSelection, clearSelection, resolveAnchor } from './offsets'
 import { answerHTML } from './render'
+import { useBackToClose } from '../components/common/useBackToClose'
 import { getAnnotation, getThread, saveAnnotation, saveThread, updateAnnotation } from '../course/dbStore'
 import { storeFor } from '../course'
 import type { CourseMeta } from '../types/course'
@@ -161,6 +162,20 @@ function FlowBlock({ items }: { items: FlowItem[] }) {
   )
 }
 
+/** md 以下面板是整屏浮出的；只有这个形态下系统返回才该关掉它（md 以上是并排的一栏） */
+function useIsNarrowViewport(): boolean {
+  const [narrow, setNarrow] = useState(() => window.matchMedia?.('(max-width: 767px)')?.matches ?? false)
+  useEffect(() => {
+    const mq = window.matchMedia?.('(max-width: 767px)')
+    if (!mq) return
+    const onChange = () => setNarrow(mq.matches)
+    onChange()
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
+  return narrow
+}
+
 export function AskPanel({
   courseId,
   courseTitle,
@@ -201,6 +216,9 @@ export function AskPanel({
 
   // 触屏：软键盘没有 Shift，Enter 得让给换行（发送走按钮）；文案也要跟着换
   const [coarsePointer] = useState(() => window.matchMedia?.('(pointer: coarse)')?.matches ?? false)
+
+  // 窄屏下面板是整屏浮层，系统返回先关它；md 以上是并排的一栏，返回该按路由走
+  useBackToClose(useIsNarrowViewport(), onClose)
 
   const [turns, setTurns] = useState<Turn[]>([])
   const [streaming, setStreaming] = useState(false)

@@ -1,6 +1,7 @@
 // 模态遮罩：Esc / 点击遮罩关闭，内容区阻止冒泡
 import { useEffect } from 'react'
 import type { ReactNode } from 'react'
+import { useBackToClose } from './useBackToClose'
 
 /**
  * 共享弹窗外壳。
@@ -28,6 +29,10 @@ export function Overlay({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
+
+  // 系统返回键（独立窗口里 Android 的返回手势是唯一的退路）先关对话框。
+  // 挂在 Overlay 上，设置 / 导入 / AI 著书三个对话框就都自动有了。
+  useBackToClose(true, onClose)
 
   return (
     <div

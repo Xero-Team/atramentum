@@ -2,6 +2,7 @@
 // 遮罩点击收起、Esc 收起；带刘海与底部指示条的避让（index.html 开了 viewport-fit=cover）。
 import { useEffect } from 'react'
 import type { ReactNode } from 'react'
+import { useBackToClose } from './useBackToClose'
 
 export function Drawer({
   open,
@@ -27,6 +28,9 @@ export function Drawer({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [open, onClose])
+
+  // 系统返回键先收抽屉（课时目录 / 问答历史都走这里）
+  useBackToClose(open, onClose)
 
   if (!open) return null
 

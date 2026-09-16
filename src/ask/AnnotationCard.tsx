@@ -10,6 +10,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import type { Annotation, AskThread, NoteMarkStyle } from './types'
 import { deleteAnnotation, updateAnnotation } from '../course/dbStore'
+import { useBackToClose } from '../components/common/useBackToClose'
 import { answerHTML } from './render'
 
 const CARD_W = 340
@@ -175,6 +176,9 @@ export function AnnotationCard({
     document.addEventListener('pointerdown', onDown)
     return () => document.removeEventListener('pointerdown', onDown)
   }, [onClose, flushNote])
+
+  // 卡片只在有内容时挂载，所以是恒定「打开」状态
+  useBackToClose(true, onClose)
 
   // 首帧还没有实测位置：先按点击点粗放一版，避免闪一下左上角
   const left = pos?.left ?? Math.max(EDGE, Math.min(x - cardW / 2, window.innerWidth - cardW - EDGE))
