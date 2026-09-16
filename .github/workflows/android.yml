@@ -27,7 +27,12 @@ jobs:
           distribution: temurin
           java-version: '21'
 
+      # 必须显式给 packages：这 action 的默认值是 'tools platform-tools'，
+      # 而 tools 在现代 SDK 仓库里已经不存在了（被 cmdline-tools 取代），
+      # 默认值会让它直接报 "Failed to find package 'tools'" 并以退出码 1 结束
       - uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
 
       # 许可必须先接受，否则 Gradle 拉不到缺的 SDK 组件
       - name: 准备 Android SDK
