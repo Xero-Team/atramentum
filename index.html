@@ -3,7 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover：让 env(safe-area-inset-*) 可用（刘海 / 底部指示条避让）；
+         interactive-widget=resizes-content：软键盘弹出时压缩布局视口，
+         否则 h-dvh 的盒子底部会被键盘盖住 -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content"
+    />
     <meta name="theme-color" content="#f5f1e8" />
     <meta name="description" content="墨痕 · AI 陪学——课件阅读与生成" />
     <title>墨痕 · AI 陪学</title>

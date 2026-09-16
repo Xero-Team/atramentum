@@ -19,8 +19,10 @@ import type { Annotation, AskThread } from '../ask/types'
 import { deleteAnnotation, getThread, listAnnotationsForPath, saveAnnotation } from '../course/dbStore'
 import { SettingsDialog } from './SettingsDialog'
 import { ThemeToggle } from './ThemeToggle'
+import { Drawer } from './common/Drawer'
 import { exportCourseZip } from '../io/export'
 import { useCategoryStore } from '../store/categoryStore'
+import { useThemeToggle } from '../store/theme'
 import { onCourseCreated, onCourseUpdated, useGenerateStore } from '../generate/generateStore'
 import { GenerateBadge } from './GenerateBadge'
 
@@ -60,19 +62,19 @@ function TocItem({
         {hasChildren ? (
           <button
             aria-label={isOpen ? '收起' : '展开'}
-            className="w-5 shrink-0 text-center text-ink-faint hover:text-cinnabar"
+            className="w-7 shrink-0 py-1 text-center text-ink-faint hover:text-cinnabar md:w-5 md:py-0"
             onClick={() => toggle(node.path)}
           >
             {isOpen ? '▾' : '▸'}
           </button>
         ) : (
-          <span className="w-5 shrink-0" />
+          <span className="w-7 shrink-0 md:w-5" />
         )}
         <button
-          className={`min-w-0 flex-1 truncate py-1 text-left text-[13px] leading-6 transition ${
+          className={`min-w-0 flex-1 truncate py-1.5 text-left text-[13px] leading-6 transition md:py-1 ${
             active ? 'font-semibold text-cinnabar-deep' : 'text-ink-soft hover:text-ink'
           }`}
-          style={{ paddingLeft: depth * 10 }}
+          style={{ paddingLeft: depth * 12 + 4 }}
           onClick={() => {
             if (hasChildren && !isOpen) toggle(node.path)
             onNavigate(node.path)
@@ -136,11 +138,17 @@ export default function Reader() {
   const [notesNonce, setNotesNonce] = useState(0)
   const [card, setCard] = useState<{ ann: Annotation; thread: AskThread | null; x: number; y: number } | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
+  // 窄屏：目录树是收起的，用抽屉补回来
+  const [tocOpen, setTocOpen] = useState(false)
+  // 头部收纳菜单（次要动作：续写 / 整书改写 / 导出 / 设置 / 主题 / 上下篇）
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
   // 刚标下的那一条：「撤销」只在几秒内有效，误触可回退
   const [undoMark, setUndoMark] = useState<{ id: string; text: string } | null>(null)
   // 从历史抽屉定位到别的节时，等标注重画完成再滚过去
   const pendingFocusRef = useRef<string | null>(null)
   const { probe, clearProbe } = useSelectionProbe(mountRef, askAvailable)
+  const { resolved: resolvedTheme, toggle: toggleTheme } = useThemeToggle()
   const reloadNotes = useCallback(() => setNotesNonce((n) => n + 1), [])
 
   // 撤销提示自动消失
@@ -149,6 +157,18 @@ export default function Reader() {
     const t = setTimeout(() => setUndoMark(null), 8000)
     return () => clearTimeout(t)
   }, [undoMark])
+
+  // 点菜单外面收起。用文档级 pointerdown 而不是铺一层 fixed 遮罩——header 上有
+  // backdrop-blur，backdrop-filter 会成为 fixed 后代的包含块，遮罩只会盖住 header 一条。
+  useEffect(() => {
+    if (!menuOpen) return
+    const onDown = (e: PointerEvent) => {
+      if (menuRef.current?.contains(e.target as Node)) return
+      setMenuOpen(false)
+    }
+    document.addEventListener('pointerdown', onDown)
+    return () => document.removeEventListener('pointerdown', onDown)
+  }, [menuOpen])
 
   /** 正文容器（mountMarkdown 挂载的 .prose / .book-text 根）；标注与划词上下文都基于它 */
   const getProseRoot = useCallback(() => {
@@ -558,42 +578,102 @@ export default function Reader() {
     })
   }, [tree, currentPath])
 
+  // 目录（桌面左栏与窄屏抽屉共用同一份，免得两处走偏）
+  const tocHead = (
+    <div className="border-b border-ink/10 px-5 pb-4 pt-5">
+      <Link to="/" className="text-xs tracking-[0.25em] text-ink-faint transition hover:text-cinnabar">
+        ← 墨痕书架
+      </Link>
+      <div className="mt-3 flex items-center gap-3">
+        <span className="h-8 w-8 shrink-0 bg-cinnabar text-center font-song text-sm font-bold leading-8 text-paper shadow-seal">
+          {meta?.seal || '课'}
+        </span>
+        <h1 className="min-w-0 truncate font-song text-base font-bold tracking-wide" title={meta?.title}>
+          {meta?.title ?? courseId}
+        </h1>
+      </div>
+    </div>
+  )
+  const tocNav = (
+    <nav className="flex-1 overflow-y-auto overscroll-contain px-3 py-3">
+      {tree?.lessons.map((l) => (
+        <TocItem
+          key={l.path}
+          node={l}
+          depth={0}
+          currentPath={currentPath}
+          expanded={expanded}
+          toggle={toggle}
+          onNavigate={(path) => {
+            goTo(path)
+            setTocOpen(false)
+          }}
+        />
+      ))}
+    </nav>
+  )
+
+  const hdrBtn =
+    'border border-ink/15 px-2.5 py-2 text-ink-soft transition hover:border-cinnabar/50 hover:text-cinnabar-deep disabled:opacity-50 md:py-1'
+
+  // 头部收纳菜单：低频动作全塞这里。收进来是为了让「目录 / 标题 / 问 AI / 历史」
+  // 在任何宽度都放得下——旧版把 8 个按钮排成一行，1024px 屏上开面板就已挤爆。
+  type MenuItem = { key: string; label: string; cls?: string; title?: string; disabled?: boolean; onClick?: () => void; divider?: boolean }
+  const menuItems: MenuItem[] = []
+  if (meta) {
+    if (meta.source === 'generated') {
+      menuItems.push({
+        key: 'continue',
+        label: '续写缺失课时',
+        title: '沿课时规划继续生成缺失的课时',
+        onClick: () => openGenerate({ continueCourse: meta }),
+      })
+    }
+    if (aiEnabled(meta)) {
+      menuItems.push({
+        key: 'rewrite',
+        label: forking ? '正在备副本…' : '整书改写',
+        title: '按你的要求整体重写全书各课时（内置课件会先另存为可编辑副本）',
+        disabled: forking,
+        onClick: () => void handleRewrite(),
+      })
+    }
+  }
+  menuItems.push({
+    key: 'export',
+    label: exporting ? '导出中…' : '导出 zip',
+    disabled: exporting || !meta,
+    onClick: () => void handleExport(),
+  })
+  menuItems.push({ key: 'settings', label: '设置', onClick: () => setShowSettings(true) })
+  menuItems.push({ key: 'theme', label: `切换到${resolvedTheme === 'dark' ? '浅色' : '深色'}`, cls: 'md:hidden', onClick: toggleTheme })
+  menuItems.push({ key: 'divider', divider: true, label: '' })
+  if (prev)
+    menuItems.push({ key: 'prev', label: `← ${prev.title}`, title: prev.title, cls: 'md:hidden', onClick: () => goTo(prev.path) })
+  if (next)
+    menuItems.push({ key: 'next', label: `${next.title} →`, title: next.title, cls: 'md:hidden', onClick: () => goTo(next.path) })
+
   return (
-    <div className="flex h-screen overflow-hidden bg-paper text-ink">
-      {/* 左：课件目录 */}
+    <div className="h-viewport flex overflow-hidden bg-paper text-ink pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
+      {/* 左：课件目录（md 以上常驻；窄屏走下面的抽屉） */}
       <aside className="hidden w-72 shrink-0 flex-col border-r border-ink/15 bg-paper-deep/40 md:flex">
-        <div className="border-b border-ink/10 px-5 pb-4 pt-5">
-          <Link to="/" className="text-xs tracking-[0.25em] text-ink-faint transition hover:text-cinnabar">
-            ← 墨痕书架
-          </Link>
-          <div className="mt-3 flex items-center gap-3">
-            <span className="h-8 w-8 shrink-0 bg-cinnabar text-center font-song text-sm font-bold leading-8 text-paper shadow-seal">
-              {meta?.seal || '课'}
-            </span>
-            <h1 className="min-w-0 truncate font-song text-base font-bold tracking-wide" title={meta?.title}>
-              {meta?.title ?? courseId}
-            </h1>
-          </div>
-        </div>
-        <nav className="flex-1 overflow-y-auto px-3 py-3">
-          {tree?.lessons.map((l) => (
-            <TocItem
-              key={l.path}
-              node={l}
-              depth={0}
-              currentPath={currentPath}
-              expanded={expanded}
-              toggle={toggle}
-              onNavigate={goTo}
-            />
-          ))}
-        </nav>
+        {tocHead}
+        {tocNav}
       </aside>
 
       {/* 右：正文 */}
       <main className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center justify-between gap-4 border-b border-ink/10 bg-paper/80 px-6 py-3 backdrop-blur">
-          <div className="min-w-0 truncate text-xs text-ink-faint">
+        <header className="flex items-center justify-between gap-2 border-b border-ink/10 bg-paper/80 px-3 py-2.5 backdrop-blur sm:gap-4 sm:px-6 sm:py-3">
+          <button
+            className="flex h-9 w-9 shrink-0 items-center justify-center border border-ink/15 text-ink-soft transition hover:border-cinnabar/50 hover:text-cinnabar-deep md:hidden"
+            onClick={() => setTocOpen(true)}
+            aria-label="课时目录"
+            title="课时目录"
+          >
+            ☰
+          </button>
+
+          <div className="min-w-0 flex-1 truncate text-xs text-ink-faint">
             <Link to="/" className="md:hidden transition hover:text-cinnabar">
               书架
             </Link>
@@ -601,11 +681,17 @@ export default function Reader() {
             {meta?.title}
             {lessonTitle && <span> / {lessonTitle}</span>}
           </div>
+
           <div className="flex shrink-0 items-center gap-2 text-xs">
-            {exportMsg && <span className="max-w-48 truncate text-ink-faint" title={exportMsg}>{exportMsg}</span>}
+            {/* 窄屏放不下长消息，改到 header 下面单独一行 */}
+            {exportMsg && (
+              <span className="hidden max-w-48 truncate text-ink-faint lg:inline" title={exportMsg}>
+                {exportMsg}
+              </span>
+            )}
             {askAvailable && (
               <button
-                className={`border px-2.5 py-1 transition ${
+                className={`border px-2.5 py-2 transition md:py-1 ${
                   askOpen
                     ? 'border-ink bg-ink text-paper'
                     : 'border-ink/15 text-ink-soft hover:border-cinnabar/50 hover:text-cinnabar-deep'
@@ -616,70 +702,69 @@ export default function Reader() {
               </button>
             )}
             <button
-              className="border border-ink/15 px-2.5 py-1 text-ink-soft transition hover:border-cinnabar/50 hover:text-cinnabar-deep"
+              className={hdrBtn}
               onClick={() => setHistoryOpen(true)}
               title="本书的划词标注与问答历史（从左侧滑出）"
             >
               历史
             </button>
-            {meta?.source === 'generated' && (
-              <button
-                className="border border-ink/15 px-2.5 py-1 text-ink-soft transition hover:border-cinnabar/50 hover:text-cinnabar-deep"
-                title="沿课时规划继续生成缺失的课时"
-                onClick={() => {
-                  openGenerate({ continueCourse: meta })
-                }}
-              >
-                续写
-              </button>
-            )}
-            {meta && aiEnabled(meta) && (
-              <button
-                className="border border-ink/15 px-2.5 py-1 text-ink-soft transition hover:border-cinnabar/50 hover:text-cinnabar-deep disabled:opacity-50"
-                title="按你的要求整体重写全书各课时（内置课件会先另存为可编辑副本）"
-                disabled={forking}
-                onClick={() => void handleRewrite()}
-              >
-                {forking ? '备副本…' : '整书改写'}
-              </button>
-            )}
-            <button
-              className="border border-ink/15 px-2.5 py-1 text-ink-soft transition hover:border-cinnabar/50 hover:text-cinnabar-deep disabled:opacity-50"
-              onClick={() => void handleExport()}
-              disabled={exporting || !meta}
-            >
-              {exporting ? '导出中…' : '导出 zip'}
-            </button>
-            <button
-              className="border border-ink/15 px-2.5 py-1 text-ink-soft transition hover:border-cinnabar/50 hover:text-cinnabar-deep"
-              onClick={() => setShowSettings(true)}
-            >
-              设置
-            </button>
-            <ThemeToggle />
+            {/* md 以上空间够，把上下篇和主题开关也摆出来 */}
+            <ThemeToggle className="hidden md:flex" />
             {prev && (
-              <button
-                className="border border-ink/15 px-2.5 py-1 text-ink-soft transition hover:border-cinnabar/50 hover:text-cinnabar-deep"
-                onClick={() => goTo(prev.path)}
-                title={prev.title}
-              >
+              <button className={`${hdrBtn} hidden md:block`} onClick={() => goTo(prev.path)} title={prev.title}>
                 ← 上一篇
               </button>
             )}
             {next && (
-              <button
-                className="border border-ink/15 px-2.5 py-1 text-ink-soft transition hover:border-cinnabar/50 hover:text-cinnabar-deep"
-                onClick={() => goTo(next.path)}
-                title={next.title}
-              >
+              <button className={`${hdrBtn} hidden md:block`} onClick={() => goTo(next.path)} title={next.title}>
                 下一篇 →
               </button>
             )}
+
+            <div className="relative" ref={menuRef}>
+              <button
+                className="flex h-9 w-9 items-center justify-center border border-ink/15 text-base leading-none text-ink-soft transition hover:border-cinnabar/50 hover:text-cinnabar-deep md:h-7 md:w-7 md:text-sm"
+                onClick={() => setMenuOpen((v) => !v)}
+                aria-label="更多操作"
+                aria-expanded={menuOpen}
+                title="更多操作"
+              >
+                ⋯
+              </button>
+              {menuOpen && (
+                <div className="absolute right-0 top-full z-50 mt-1 max-h-[70vh] w-48 overflow-y-auto overscroll-contain border border-ink/20 bg-paper py-1 shadow-paper">
+                  {menuItems.map((it) =>
+                    it.divider ? (
+                      <div key={it.key} className="my-1 border-t border-ink/10" />
+                    ) : (
+                      <button
+                        key={it.key}
+                        className={`block w-full truncate px-3 py-2.5 text-left text-xs text-ink-soft transition hover:bg-ink/5 hover:text-cinnabar-deep disabled:opacity-40 md:py-1.5 ${it.cls ?? ''}`}
+                        disabled={it.disabled}
+                        title={it.title}
+                        onClick={() => {
+                          setMenuOpen(false)
+                          it.onClick?.()
+                        }}
+                      >
+                        {it.label}
+                      </button>
+                    ),
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </header>
 
-        <div ref={scrollRef} className="flex-1 overflow-y-auto" onClick={onBodyClick}>
-          <div className="mx-auto max-w-4xl px-6 py-10">
+        {exportMsg && (
+          <div className="border-b border-ink/10 bg-paper-deep/40 px-3 py-1.5 text-xs text-ink-faint lg:hidden">
+            {exportMsg}
+          </div>
+        )}
+
+        <div ref={scrollRef} className="flex-1 overflow-y-auto overscroll-contain" onClick={onBodyClick}>
+          <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6 sm:py-10">
             {phase === 'loading' && <p className="text-sm text-ink-faint">展卷中……</p>}
             {phase === 'missing' && (
               <div className="border border-ink/15 bg-paper-deep/40 p-6 text-sm text-ink-soft">
@@ -740,6 +825,12 @@ export default function Reader() {
         />
       )}
 
+      {/* 窄屏的课时目录：与左栏同一份内容，从左侧滑出 */}
+      <Drawer open={tocOpen} onClose={() => setTocOpen(false)} label="课时目录" width="min(86vw,320px)">
+        {tocHead}
+        {tocNav}
+      </Drawer>
+
       {/* 历史抽屉：从屏幕左侧滑出，盖在目录树之上 */}
       <AskHistory
         courseId={meta?.id ?? courseId}
@@ -752,18 +843,18 @@ export default function Reader() {
 
       {/* 刚标下的那一条：给几秒钟反悔的机会（浏览器选区已收起，不会再有撤不掉的划词状态） */}
       {undoMark && (
-        <div className="fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 border border-ink/20 bg-paper px-3.5 py-2 text-xs text-ink-soft shadow-paper">
-          <span className="max-w-64 truncate">
+        <div className="fixed bottom-[max(1.25rem,env(safe-area-inset-bottom))] left-1/2 z-50 flex max-w-[calc(100vw-1.5rem)] -translate-x-1/2 items-center gap-3 border border-ink/20 bg-paper px-3.5 py-2 text-xs text-ink-soft shadow-paper">
+          <span className="min-w-0 max-w-56 truncate">
             已标注「<span className="font-song text-ink">{undoMark.text}</span>」
           </span>
           <button
-            className="shrink-0 border border-ink/20 px-2 py-0.5 text-ink-soft transition hover:border-cinnabar/60 hover:text-cinnabar-deep"
+            className="-my-1 shrink-0 border border-ink/20 px-2.5 py-1.5 text-ink-soft transition hover:border-cinnabar/60 hover:text-cinnabar-deep md:my-0 md:py-0.5"
             onClick={() => void undoLastMark()}
           >
             撤销
           </button>
           <button
-            className="shrink-0 text-ink-faint transition hover:text-cinnabar"
+            className="-my-1 -mr-1 shrink-0 p-1.5 text-ink-faint transition hover:text-cinnabar md:my-0 md:mr-0"
             onClick={() => setUndoMark(null)}
             aria-label="关闭提示"
           >
@@ -772,9 +863,12 @@ export default function Reader() {
         </div>
       )}
 
-      {probe && <FloatingToolbar x={probe.x} y={probe.y} onAsk={handleAsk} onMark={() => void handleMark()} />}
+      {probe && (
+        <FloatingToolbar x={probe.x} y={probe.y} selTop={probe.top} onAsk={handleAsk} onMark={() => void handleMark()} />
+      )}
       {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} />}
-      <GenerateBadge />
+      {/* 撤销提示也占着底部中间，把后台生成印章抬起来免得叠在一起 */}
+      <GenerateBadge lift={!!undoMark} />
     </div>
   )
 }

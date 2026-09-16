@@ -9,6 +9,8 @@ export interface SelectionProbe {
   /** 浮钮定位：选区右下角（viewport 坐标） */
   x: number
   y: number
+  /** 选区上沿（viewport 坐标）：触屏上浮钮要翻到选区上方，得知道上面还有没有地方 */
+  top: number
   text: string
 }
 
@@ -40,7 +42,7 @@ export function useSelectionProbe(containerRef: RefObject<HTMLElement | null>, e
         setProbe(null)
         return
       }
-      setProbe({ x: rect.right, y: rect.bottom, text })
+      setProbe({ x: rect.right, y: rect.bottom, top: rect.top, text })
     }
     const onChange = () => {
       window.clearTimeout(timerRef.current)

@@ -125,3 +125,17 @@
     animation: none;
   }
 }
+
+/* 视口高度：移动浏览器地址栏/工具栏会伸缩，100vh 按「最大视口」算，
+   结果就是贴底的盒子被浏览器工具栏盖住一截。dvh 跟随实际视口；
+   写成两条声明让老浏览器自然退回 vh（不支持的声明被忽略，不会把高度打没）。 */
+@layer utilities {
+  .h-viewport {
+    height: 100vh;
+    height: 100dvh;
+  }
+  .max-h-viewport {
+    max-height: calc(100vh - 16px);
+    max-height: calc(100dvh - 16px);
+  }
+}

@@ -199,6 +199,9 @@ export function AskPanel({
 }) {
   const ai = useSettingsStore((s) => s.ai)
 
+  // 触屏：软键盘没有 Shift，Enter 得让给换行（发送走按钮）；文案也要跟着换
+  const [coarsePointer] = useState(() => window.matchMedia?.('(pointer: coarse)')?.matches ?? false)
+
   const [turns, setTurns] = useState<Turn[]>([])
   const [streaming, setStreaming] = useState(false)
   const [error, setError] = useState('')
@@ -568,10 +571,11 @@ export function AskPanel({
   }
 
   const onInputKey = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      send()
-    }
+    if (e.key !== 'Enter' || e.shiftKey) return
+    // 触屏的软键盘没有 Shift，Enter 一律当换行用，发送交给下面的「发送」按钮
+    if (coarsePointer) return
+    e.preventDefault()
+    send()
   }
 
   const applyEdit = (idx: number, text: string) => {
@@ -615,8 +619,12 @@ export function AskPanel({
   )
 
   return (
-    <aside className="relative flex h-full w-full shrink-0 flex-col border-l border-ink/15 bg-paper-deep/30 sm:w-[420px]">
-      <header className="flex items-center justify-between border-b border-ink/10 px-4 py-3">
+    /* md 以下整屏浮层：640~767px 之间目录树本来就是收起的，再让面板占 420px
+       只剩两百来像素给正文，两头都难受。md 以上才作为第三栏并排。
+       注意触屏上不要给显式高度——`fixed inset-0` 的高度来自视口本身，
+       写死 h-full(100vh) 反而会被移动浏览器的地址栏盖住底部的输入舱。 */
+    <aside className="relative flex h-full w-full shrink-0 flex-col border-l border-ink/15 bg-paper-deep/30 max-md:fixed max-md:inset-0 max-md:z-40 max-md:border-l-0 md:w-[420px]">
+      <header className="flex items-center justify-between gap-2 border-b border-ink/10 px-4 py-3">
         <div className="min-w-0">
           <h2 className="font-song text-sm font-bold tracking-widest text-ink">问 AI</h2>
           <p className="mt-0.5 truncate text-xs text-ink-faint">
@@ -624,15 +632,19 @@ export function AskPanel({
             {savedMsg && <span className="ml-2 text-cinnabar">✓ {savedMsg}</span>}
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-3">
+        <div className="flex shrink-0 items-center gap-2">
           <button
-            className="border border-ink/15 px-2 py-0.5 text-xs text-ink-soft transition hover:border-cinnabar/50 hover:text-cinnabar-deep"
+            className="border border-ink/15 px-2.5 py-2 text-xs text-ink-soft transition hover:border-cinnabar/50 hover:text-cinnabar-deep md:py-0.5"
             onClick={() => onOpenHistory?.()}
             title="本书的划词标注与问答历史（从左侧滑出）"
           >
             历史
           </button>
-          <button className="text-ink-faint transition hover:text-cinnabar" onClick={onClose} aria-label="关闭问答">
+          <button
+            className="-my-2 -mr-1 p-2 text-ink-faint transition hover:text-cinnabar"
+            onClick={onClose}
+            aria-label="关闭问答"
+          >
             ✕
           </button>
         </div>
@@ -646,7 +658,7 @@ export function AskPanel({
               填入你的 API 请求地址与密钥即可开问（支持 OpenAI 兼容端点与 Anthropic；密钥只存本机浏览器）。
             </p>
             <button
-              className="mt-3 bg-cinnabar px-3 py-1.5 text-xs text-paper transition hover:bg-cinnabar-deep"
+              className="mt-3 bg-cinnabar px-3 py-2 text-xs text-paper transition hover:bg-cinnabar-deep md:py-1.5"
               onClick={onOpenSettings}
             >
               去设置
@@ -655,7 +667,7 @@ export function AskPanel({
         </div>
       ) : (
         <>
-          <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
+          <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-4">
             {turns.length === 0 && (
               <p className="text-xs leading-6 text-ink-faint">
                 提问后我会按需翻阅、检索本课件再作答，查证过程见「工作流程」；也可以直接追问。
@@ -701,7 +713,7 @@ export function AskPanel({
                       ) : (
                         <>
                           <button
-                            className="bg-cinnabar px-3 py-1 text-xs text-paper transition hover:bg-cinnabar-deep"
+                            className="bg-cinnabar px-3 py-2 text-xs text-paper transition hover:bg-cinnabar-deep md:py-1"
                             onClick={() => applyEdit(i, t.content)}
                           >
                             应用到本节
@@ -722,11 +734,11 @@ export function AskPanel({
             )}
           </div>
 
-          <footer className="border-t border-ink/10 p-3">
+          <footer className="border-t border-ink/10 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:pb-3">
             {canEdit && (
-              <div className="mb-2 flex items-center gap-1.5">
+              <div className="mb-2 flex flex-wrap items-center gap-1.5">
                 <button
-                  className={`px-2.5 py-1 text-xs transition ${
+                  className={`px-3 py-2 text-xs transition md:py-1 ${
                     mode === 'ask' ? 'bg-ink text-paper' : 'border border-ink/20 text-ink-soft hover:border-cinnabar/50'
                   }`}
                   onClick={() => setMode('ask')}
@@ -734,7 +746,7 @@ export function AskPanel({
                   问 AI
                 </button>
                 <button
-                  className={`px-2.5 py-1 text-xs transition ${
+                  className={`px-3 py-2 text-xs transition md:py-1 ${
                     mode === 'edit' ? 'bg-ink text-paper' : 'border border-ink/20 text-ink-soft hover:border-cinnabar/50'
                   }`}
                   onClick={() => setMode('edit')}
@@ -742,12 +754,12 @@ export function AskPanel({
                   改写本节
                 </button>
                 {mode === 'ask' && apiMsgsRef.current.length === 0 && historyRef.current.length === 0 && (
-                  <label className="ml-auto flex cursor-pointer items-center gap-1 text-xs text-ink-faint">
+                  <label className="ml-auto flex cursor-pointer items-center gap-1.5 py-1 text-xs text-ink-faint">
                     <input
                       type="checkbox"
                       checked={includeSection}
                       onChange={(e) => setIncludeSection(e.target.checked)}
-                      className="accent-[#c03f2b]"
+                      className="accent-cinnabar"
                     />
                     附上本节全文
                   </label>
@@ -772,20 +784,24 @@ export function AskPanel({
                 }}
                 onKeyDown={onInputKey}
               />
-              <div className="flex items-center justify-between border-t border-ink/10 px-2.5 py-1.5">
-                <span className="pl-1 text-[11px] text-ink-faint">
-                  {mode === 'edit' ? 'Enter 发送 · 结果可「应用」写回本节' : 'Enter 发送 · Shift+Enter 换行'}
+              <div className="flex items-center justify-between gap-2 border-t border-ink/10 px-2.5 py-1.5">
+                <span className="min-w-0 pl-1 text-[11px] leading-4 text-ink-faint">
+                  {mode === 'edit'
+                    ? '结果可「应用」写回本节'
+                    : coarsePointer
+                      ? '回车换行 · 点「发送」送出'
+                      : 'Enter 发送 · Shift+Enter 换行'}
                 </span>
                 {streaming ? (
                   <button
-                    className="border border-ink/25 px-3 py-1 text-xs text-ink-soft transition hover:border-cinnabar/60 hover:text-cinnabar-deep"
+                    className="shrink-0 border border-ink/25 px-3 py-2 text-xs text-ink-soft transition hover:border-cinnabar/60 hover:text-cinnabar-deep md:py-1"
                     onClick={() => abortRef.current?.abort()}
                   >
                     ■ 停止
                   </button>
                 ) : (
                   <button
-                    className="bg-cinnabar px-3.5 py-1 text-xs text-paper transition hover:bg-cinnabar-deep disabled:opacity-40"
+                    className="shrink-0 bg-cinnabar px-3.5 py-2 text-xs text-paper transition hover:bg-cinnabar-deep disabled:opacity-40 md:py-1"
                     onClick={send}
                     disabled={!input.trim()}
                   >
