@@ -1,4 +1,4 @@
-// 阅读视图：左目录树 + 中央排印正文 + 右 AI 面板（问答/改写）；md 相对链接转为应用内跳转
+// Reading view: the tree on the left, typeset prose in the middle, the AI panel on the right (Q&A / rewrite); relative md links become in-app navigation
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MouseEvent as ReactMouseEvent } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
@@ -38,7 +38,7 @@ function flattenLessons(nodes: LessonNode[], out: LessonNode[] = []): LessonNode
   return out
 }
 
-/** 目录树节点：章（含 children）可折叠；点击章标题进入章 README */
+/** A tree node: chapters (those with children) collapse; tapping a chapter title opens its README */
 function TocItem({
   node,
   depth,
@@ -120,50 +120,50 @@ export default function Reader() {
   const currentPath = searchParams.get('path') ?? ''
   const mountRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
-  // 折叠状态：存「已展开」的章路径；默认展开含当前节的那一章
+  // Collapse state: the paths of expanded chapters; the chapter holding the current section starts expanded
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
 
-  // AI 面板：任何格式都能划词问 AI（书籍同样可标注、记笔记）
+  // The AI panel: any format can select text and ask (books can be highlighted and annotated too)
   const askAvailable = phase === 'ready'
-  // 「改写本节 / 整书改写」仍只对 md 课件开放
+  // "Rewrite lesson / whole book" is still md courses only
   const canEdit = meta ? aiEnabled(meta) : false
   const [askOpen, setAskOpen] = useState(false)
   const [askSeed, setAskSeed] = useState<AskSeed | null>(null)
   const [showSettings, setShowSettings] = useState(false)
-  // 续写 / 整书改写：走全局生成对话框（最小化后生成不中断）
+  // Continue / whole-book rewrite: goes through the global generation dialog (minimising does not interrupt it)
   const openGenerate = useGenerateStore((s) => s.openGenerate)
   const [forking, setForking] = useState(false)
   const [reloadNonce, setReloadNonce] = useState(0)
   const [exporting, setExporting] = useState(false)
   const [exportMsg, setExportMsg] = useState('')
-  // 划词标注（当前节）与标注卡
+  // The current section's highlights, and the annotation card
   const [annotations, setAnnotations] = useState<Annotation[]>([])
   const [notesNonce, setNotesNonce] = useState(0)
   const [card, setCard] = useState<{ ann: Annotation; thread: AskThread | null; x: number; y: number } | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
-  // 窄屏：目录树是收起的，用抽屉补回来
+  // Narrow screens: the tree is collapsed, so a drawer brings it back
   const [tocOpen, setTocOpen] = useState(false)
-  // 头部收纳菜单（次要动作：续写 / 整书改写 / 导出 / 设置 / 主题 / 上下篇）
+  // The header's overflow menu (secondary actions: continue / rewrite / export / settings / theme / prev-next)
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
-  // 刚标下的那一条：「撤销」只在几秒内有效，误触可回退
+  // The highlight just made: Undo is only live for a few seconds, so a mis-tap can be taken back
   const [undoMark, setUndoMark] = useState<{ id: string; text: string } | null>(null)
-  // 从历史抽屉定位到别的节时，等标注重画完成再滚过去
+  // Jumping to another section from the history drawer waits for the marks to repaint before scrolling
   const pendingFocusRef = useRef<string | null>(null)
   const { probe, clearProbe } = useSelectionProbe(mountRef, askAvailable)
   const { resolved: resolvedTheme, toggle: toggleTheme } = useThemeToggle()
   const { t } = useI18n()
   const reloadNotes = useCallback(() => setNotesNonce((n) => n + 1), [])
 
-  // 撤销提示自动消失
+  // The undo toast disappears on its own
   useEffect(() => {
     if (!undoMark) return
     const t = setTimeout(() => setUndoMark(null), 8000)
     return () => clearTimeout(t)
   }, [undoMark])
 
-  // 点菜单外面收起。用文档级 pointerdown 而不是铺一层 fixed 遮罩——header 上有
-  // backdrop-blur，backdrop-filter 会成为 fixed 后代的包含块，遮罩只会盖住 header 一条。
+  // Close on an outside tap. A document-level pointerdown rather than a fixed scrim — the header has
+  // backdrop-blur, and backdrop-filter makes an element the containing block for fixed descendants, so a scrim would only cover the header band.
   useEffect(() => {
     if (!menuOpen) return
     const onDown = (e: PointerEvent) => {
@@ -174,10 +174,10 @@ export default function Reader() {
     return () => document.removeEventListener('pointerdown', onDown)
   }, [menuOpen])
 
-  // 系统返回键先收 ⋯ 菜单
+  // The system back gesture closes the ⋯ menu first
   useBackToClose(menuOpen, () => setMenuOpen(false))
 
-  /** 正文容器（mountMarkdown 挂载的 .prose / .book-text 根）；标注与划词上下文都基于它 */
+  /** The prose container (the .prose / .book-text root mountMarkdown fills); highlights and selection context are both based on it */
   const getProseRoot = useCallback(() => {
     const first = mountRef.current?.firstElementChild
     return first instanceof HTMLElement ? first : null
@@ -207,7 +207,7 @@ export default function Reader() {
     }
   }, [meta, exporting, t])
 
-  /** 划词 → 起一轮带上下文的问答（nonce 用时间戳，做题号也当会话 id 用） */
+  /** Selection → start a contextual Q&A round (the nonce is a timestamp, serving as both the question number and the conversation id) */
   const handleAsk = useCallback(() => {
     if (!probe?.text) return
     setAskSeed({ selection: probe.text, nonce: Date.now() })
@@ -215,7 +215,7 @@ export default function Reader() {
     clearProbe()
   }, [probe, clearProbe])
 
-  /** 划词 → 只上墨（高亮）+ 开笔记卡，不打扰 AI */
+  /** Selection → just mark it (highlight) and open the note card, without troubling the AI */
   const handleMark = useCallback(async () => {
     const text = probe?.text
     const spot = probe ? { x: probe.x, y: probe.y } : null
@@ -224,9 +224,9 @@ export default function Reader() {
     const host = getProseRoot()
     if (!host) return
     const anchor = anchorFromSelection(host, text)
-    // sectionTitle 也要从当前选区推（extractAskContext 读 window.getSelection），必须在收起前取
+    // sectionTitle is derived from the current selection too (extractAskContext reads window.getSelection), so it has to be taken before collapsing
     const sectionTitle = extractAskContext(host, text).sectionTitle
-    // 锚点已拿到，立刻收起选区：留着的话朱红选区会盖住标注，看着像撤不掉的状态
+    // The anchor is in hand, so collapse the selection at once: left as it is, the cinnabar selection paints over the highlight and reads as a stuck state
     clearSelection()
     if (!anchor) {
       setExportMsg(t.reader.markSpanTooWide)
@@ -256,7 +256,7 @@ export default function Reader() {
     }
   }, [probe, clearProbe, meta, currentPath, getProseRoot, reloadNotes, t])
 
-  /** 撤销刚标下的那一条（误触可回退） */
+  /** Take back the highlight just made (a mis-tap can be undone) */
   const undoLastMark = useCallback(async () => {
     const target = undoMark
     setUndoMark(null)
@@ -271,18 +271,18 @@ export default function Reader() {
     }
   }, [undoMark, reloadNotes, t])
 
-  /** 点正文里的高亮/下划线 → 开标注卡（带出关联的问答） */
+  /** Tap a highlight/underline in the prose → open the annotation card (bringing its Q&A along) */
   const openCard = useCallback(async (ann: Annotation, x: number, y: number) => {
     const t = ann.threadId ? await getThread(ann.threadId).catch(() => undefined) : undefined
     setCard({ ann, thread: t ?? null, x, y })
   }, [])
 
-  /** 从历史抽屉点某条标注 → 跳过去并打开卡片 */
+  /** Tapping a highlight in the history drawer → jump there and open its card */
   const openAnnotationFromPanel = useCallback(
     async (ann: Annotation) => {
       setHistoryOpen(false)
       if (ann.path && ann.path !== currentPath) {
-        // 换节后正文要重新取，等标注重画完成再滚过去（见下面的 paint 副作用）
+        // The prose is refetched after switching sections, so wait for the marks to repaint before scrolling (see the paint effect below)
         pendingFocusRef.current = ann.id
         setSearchParams({ path: ann.path })
       } else {
@@ -293,14 +293,14 @@ export default function Reader() {
     [currentPath, setSearchParams, openCard],
   )
 
-  /** 从历史抽屉点某段问答 → 打开面板并就地复现整段对话（读本地，不重发请求） */
+  /** Tapping a conversation in the history drawer → open the panel and replay it in place (local records only, no request) */
   const openThreadFromHistory = useCallback((t: AskThread) => {
     setHistoryOpen(false)
     setAskSeed({ selection: t.selection, nonce: Date.now(), thread: t })
     setAskOpen(true)
   }, [])
 
-  /** 整书改写：内置课件先 fork 成可编辑副本，其余来源直接写回原书 */
+  /** Whole-book rewrite: a built-in course is forked into an editable copy first; other sources are written back in place */
   const handleRewrite = useCallback(async () => {
     if (!meta || forking) return
     setForking(true)
@@ -321,7 +321,7 @@ export default function Reader() {
     }
   }, [meta, forking, openGenerate, t])
 
-  /** AI 改写应用：builtin 先 fork 成副本并跳转；本地课件直接写回并刷新正文 */
+  /** Applying an AI rewrite: a builtin is forked and navigated to first; a local course is written back and its prose refreshed */
   const handleApplyEdit = useCallback(
     async (text: string): Promise<string | null> => {
       if (!meta || !currentPath) return t.reader.courseNotLoaded
@@ -329,7 +329,7 @@ export default function Reader() {
         let target = meta
         if (meta.source === 'builtin') {
           target = await forkCourseForEdit(meta)
-          // 副本继承原分类归属
+          // The copy inherits the original's category
           const cat = useCategoryStore.getState().assign[meta.id]
           if (cat) useCategoryStore.getState().assignTo(target.id, cat)
           await applyCourseEdit(target, currentPath, text)
@@ -349,7 +349,7 @@ export default function Reader() {
     [meta, courseId, currentPath, navigate, t],
   )
 
-  // 载入课件元信息与目录树
+  // Load the course metadata and tree
   useEffect(() => {
     let alive = true
     setPhase('loading')
@@ -385,11 +385,11 @@ export default function Reader() {
     }
   }, [courseId, reloadNonce])
 
-  // AI 著书写成（含续写/改写写回）→ 若正是当前书，重载目录树与正文
+  // Write-with-AI finished (a continuation or rewrite included) → when it is the current book, reload the tree and the prose
   useEffect(() => onCourseCreated((m) => m.id === courseId && setReloadNonce((n) => n + 1)), [courseId])
 
-  // 实时著书：每课时落库 → 只换 meta 并重建目录树（新课时长出来），
-  // 不走整页重载——正在读的正文与目录折叠状态都不打扰
+  // Live writing: each lesson landing swaps only the meta and rebuilds the tree (so the new lesson appears),
+  // rather than reloading the page — the prose being read and the tree's collapse state are left undisturbed
   useEffect(
     () =>
       onCourseUpdated((m) => {
@@ -405,9 +405,9 @@ export default function Reader() {
 
   const flat = useMemo(() => (tree ? flattenLessons(tree.lessons) : []), [tree])
 
-  // 无 path 参数 → 定位第一节；path 不在树内分两种情况：
-  // · 课时在 meta.files 里却未进树（刚写出，树仍是旧缓存）→ 只等 reload，不重定向
-  // · 路径真不存在 → 拽回第一节
+  // No path parameter → go to the first section. A path outside the tree splits two ways:
+  // · the lesson is in meta.files but not yet in the tree (just written; the tree is a stale cache) → wait for the reload, do not redirect
+  // · the path genuinely does not exist → pull back to the first section
   useEffect(() => {
     if (phase !== 'ready' || flat.length === 0) return
     if (currentPath && flat.some((l) => l.path === currentPath)) return
@@ -415,7 +415,7 @@ export default function Reader() {
     setSearchParams({ path: flat[0].path }, { replace: true })
   }, [phase, flat, currentPath, meta, setSearchParams])
 
-  // 拉取正文（依赖只认 source 的字符串，避免每课时落库换 meta 对象导致正文闪烁重拉）
+  // Fetch the prose (the dependency is the source string alone, so a fresh meta object per stored lesson cannot make the prose refetch and flicker)
   const contentSource = meta?.source
   useEffect(() => {
     if (phase !== 'ready' || !currentPath || !contentSource) return
@@ -435,8 +435,8 @@ export default function Reader() {
     }
   }, [phase, courseId, currentPath, contentSource])
 
-  // AI 著书实时入库：正在后台生成的书，正文可能还没写完——失败时自动轮询重试，
-  // 写完的那一刻自动出现（「文到即读」），无需手动刷新
+  // Live saving while writing: a book being generated in the background may not have its prose yet — a failure retries on a poll,
+  // and the text appears the moment it lands ("read on arrival"), with no manual refresh
   const [contentRetry, setContentRetry] = useState(0)
   useEffect(() => {
     if (!contentErr) return
@@ -462,12 +462,12 @@ export default function Reader() {
     }
   }, [contentRetry, phase, courseId, currentPath, contentSource])
 
-  // 渲染 markdown/书籍内容 → DOM（md 含链接改写、heading id）
+  // Render markdown / book content into the DOM (markdown includes link rewriting and heading ids)
   useEffect(() => {
     const host = mountRef.current
     if (!host || content === null || !currentPath) return
     if (/\.html?$/i.test(currentPath)) {
-      // EPUB 章节：净化后的 HTML 直接进 prose 排印
+      // EPUB chapters: the sanitised HTML goes straight into the prose for typesetting
       const root = document.createElement('div')
       root.className = 'prose prose-moxue'
       root.innerHTML = DOMPurify.sanitize(content, {
@@ -481,7 +481,7 @@ export default function Reader() {
       })
       host.replaceChildren(root)
     } else if (/\.txt$/i.test(currentPath)) {
-      // PDF 逐页文本：等宽舒展、保留原始换行
+      // PDF per-page text: monospaced and airy, keeping its original line breaks
       const root = document.createElement('div')
       root.className = 'book-text mx-auto'
       root.textContent = content
@@ -491,7 +491,7 @@ export default function Reader() {
         mountMarkdown(renderMarkdown(content), {
           filePath: currentPath,
           onLink: (coursePath) => {
-            // 越出课程根 / 不可解析链接：renderer 已加 link-blocked 并拦截点击，这里仅提示
+            // Outside the course root / an unresolvable link: the renderer already adds link-blocked and blocks the click, so this only warns
             if (!coursePath) console.info('[moxue] link points outside the course or cannot be resolved — blocked')
           },
         }),
@@ -500,7 +500,7 @@ export default function Reader() {
     scrollRef.current?.scrollTo({ top: 0 })
   }, [content, currentPath])
 
-  // 当前节的划词标注（正文更新后重取：AI 改写会让锚点需要重新对齐）
+  // The current section's highlights (refetched when the prose changes: an AI rewrite makes the anchors need realigning)
   useEffect(() => {
     if (!courseId || !currentPath) {
       setAnnotations([])
@@ -517,12 +517,12 @@ export default function Reader() {
     }
   }, [courseId, currentPath, notesNonce, content])
 
-  // 上墨：声明在正文渲染之后，同一轮提交里先换 DOM 再画标记
+  // Painting: declared after the prose render, so the DOM is swapped before the marks are painted within the same commit
   useEffect(() => {
     const root = mountRef.current?.firstElementChild
     if (!(root instanceof HTMLElement) || content === null) return
     if (annotations.length > 0 && !highlightsSupported()) {
-      // 老浏览器（无 CSS Custom Highlight API）降级：标注仍存着，历史里可看可编辑，只是不上色
+      // Older browsers (no CSS Custom Highlight API) degrade: the highlights are still stored and still viewable and editable in the history, just not painted
       console.info('[moxue] this browser lacks the CSS Custom Highlight API; highlights will not be painted')
     }
     paintMarks(root, annotations)
@@ -558,7 +558,7 @@ export default function Reader() {
         }
         return
       }
-      // 标注命中 → 开标注卡（看问答 / 写笔记 / 换样式）
+      // A mark was hit → open the annotation card (read the Q&A / write a note / change the style)
       const hit = annotationAtPoint(e.clientX, e.clientY)
       if (hit) {
         void openCard(hit, e.clientX, e.clientY)
@@ -569,13 +569,13 @@ export default function Reader() {
     [goTo, openCard],
   )
 
-  // 当前节在扁平序列里的位置（上下篇导航）
+  // Where the current section sits in the flat sequence (for prev/next navigation)
   const idx = flat.findIndex((l) => l.path === currentPath)
   const prev = idx > 0 ? flat[idx - 1] : null
   const next = idx >= 0 && idx < flat.length - 1 ? flat[idx + 1] : null
   const lessonTitle = idx >= 0 ? flat[idx].title : ''
 
-  // 目录树就绪后展开包含当前节的章（children 仅一层，直接匹配即可）
+  // Once the tree is ready, expand the chapter holding the current section (children are one level deep, so a direct match is enough)
   useEffect(() => {
     if (!tree || !currentPath) return
     const owners = tree.lessons.filter((l) => l.children?.some((c) => c.path === currentPath)).map((l) => l.path)
@@ -588,7 +588,7 @@ export default function Reader() {
     })
   }, [tree, currentPath])
 
-  // 目录（桌面左栏与窄屏抽屉共用同一份，免得两处走偏）
+  // The tree (shared by the desktop left column and the narrow-screen drawer, so the two cannot drift)
   const tocHead = (
     <div className="border-b border-ink/10 px-5 pb-4 pt-5">
       <Link to="/" className="text-xs tracking-[0.25em] text-ink-faint transition hover:text-cinnabar">
@@ -626,8 +626,8 @@ export default function Reader() {
   const hdrBtn =
     'border border-ink/15 px-2.5 py-2 text-ink-soft transition hover:border-cinnabar/50 hover:text-cinnabar-deep disabled:opacity-50 md:py-1'
 
-  // 头部收纳菜单：低频动作全塞这里。收进来是为了让「目录 / 标题 / 问 AI / 历史」
-  // 在任何宽度都放得下——旧版把 8 个按钮排成一行，1024px 屏上开面板就已挤爆。
+  // The header's overflow menu: every low-frequency action goes in here. They were tucked away so that "tree / title / Ask AI / history"
+  // fit at any width — the old layout put eight buttons in a row, which already overflowed on a 1024px screen with the panel open.
   type MenuItem = { key: string; label: string; cls?: string; title?: string; disabled?: boolean; onClick?: () => void; divider?: boolean }
   const menuItems: MenuItem[] = []
   if (meta) {
@@ -665,13 +665,13 @@ export default function Reader() {
 
   return (
     <div className="h-viewport flex overflow-hidden bg-paper text-ink pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
-      {/* 左：课件目录（md 以上常驻；窄屏走下面的抽屉） */}
+      {/* Left: the course tree (always there above md; a drawer below) */}
       <aside className="hidden w-72 shrink-0 flex-col border-r border-ink/15 bg-paper-deep/40 md:flex">
         {tocHead}
         {tocNav}
       </aside>
 
-      {/* 右：正文 */}
+      {/* Centre: the prose */}
       <main className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center justify-between gap-2 border-b border-ink/10 bg-paper/80 px-3 py-2.5 backdrop-blur sm:gap-4 sm:px-6 sm:py-3">
           <button
@@ -693,7 +693,7 @@ export default function Reader() {
           </div>
 
           <div className="flex shrink-0 items-center gap-2 text-xs">
-            {/* 窄屏放不下长消息，改到 header 下面单独一行 */}
+            {/* A long message will not fit on a narrow screen, so it moves to its own row under the header */}
             {exportMsg && (
               <span className="hidden max-w-48 truncate text-ink-faint lg:inline" title={exportMsg}>
                 {exportMsg}
@@ -718,7 +718,7 @@ export default function Reader() {
             >
               {t.common.history}
             </button>
-            {/* md 以上空间够，把上下篇和主题开关也摆出来 */}
+            {/* There is room above md, so prev/next and the theme toggle come out too */}
             <ThemeToggle className="hidden md:flex" />
             {prev && (
               <button className={`${hdrBtn} hidden md:block`} onClick={() => goTo(prev.path)} title={prev.title}>
@@ -795,13 +795,13 @@ export default function Reader() {
             {phase === 'ready' && !contentErr && content === null && (
               <p className="text-sm text-ink-faint">{t.reader.fetching}</p>
             )}
-            {/* 渲染产物挂载点（.prose 根由 mountMarkdown 生成） */}
+            {/* Mount point for the rendered output (mountMarkdown creates the .prose root) */}
             <div ref={mountRef} />
           </div>
         </div>
       </main>
 
-      {/* 右：AI 面板（md 课件可改写；书籍亦可划词问 AI、标注记笔记） */}
+      {/* Right: the AI panel (md courses can be rewritten; books can still select-and-ask and be highlighted) */}
       {askOpen && askAvailable && meta && (
         <AskPanel
           key={meta.id}
@@ -838,13 +838,13 @@ export default function Reader() {
         />
       )}
 
-      {/* 窄屏的课时目录：与左栏同一份内容，从左侧滑出 */}
+      {/* The lesson tree on narrow screens: the same content as the left column, sliding in from the left */}
       <Drawer open={tocOpen} onClose={() => setTocOpen(false)} label={t.reader.tocTitle} width="min(86vw,320px)">
         {tocHead}
         {tocNav}
       </Drawer>
 
-      {/* 历史抽屉：从屏幕左侧滑出，盖在目录树之上 */}
+      {/* The history drawer: slides in from the left, over the tree */}
       <AskHistory
         courseId={meta?.id ?? courseId}
         open={historyOpen}
@@ -854,7 +854,7 @@ export default function Reader() {
         onJumpToPath={goTo}
       />
 
-      {/* 刚标下的那一条：给几秒钟反悔的机会（浏览器选区已收起，不会再有撤不掉的划词状态） */}
+      {/* The highlight just made: a few seconds to change your mind (the selection is already collapsed, so there can be no stuck selecting state) */}
       {undoMark && (
         <div className="fixed bottom-[max(1.25rem,env(safe-area-inset-bottom))] left-1/2 z-50 flex max-w-[calc(100vw-1.5rem)] -translate-x-1/2 items-center gap-3 border border-ink/20 bg-paper px-3.5 py-2 text-xs text-ink-soft shadow-paper">
           <span className="min-w-0 max-w-56 truncate">
@@ -880,7 +880,7 @@ export default function Reader() {
         <FloatingToolbar x={probe.x} y={probe.y} selTop={probe.top} onAsk={handleAsk} onMark={() => void handleMark()} />
       )}
       {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} />}
-      {/* 撤销提示也占着底部中间，把后台生成印章抬起来免得叠在一起 */}
+      {/* The undo toast shares the bottom centre, so the background-writing badge is lifted clear of it */}
       <GenerateBadge lift={!!undoMark} />
     </div>
   )

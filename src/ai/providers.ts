@@ -1,16 +1,16 @@
 /**
- * AI Provider 适配器（原生 fetch，浏览器直连 BYOK）
+ * AI provider adapters (native fetch; the browser talks to the provider directly, BYOK)
  *
- * - openai-compatible: OpenAI / DeepSeek / 通义 / 智谱，POST /chat/completions
- * - anthropic: Claude，POST /messages（浏览器直连需 anthropic-dangerous-direct-browser-access 头）
+ * - openai-compatible: OpenAI / DeepSeek / Qwen / Zhipu, POST /chat/completions
+ * - anthropic: Claude, POST /messages (a direct browser call needs the anthropic-dangerous-direct-browser-access header)
  *
- * 统一接口：
- * - chat()       一次性调用（短请求，如连通性测试）
- * - chatStream() SSE 流式调用（划词问答、逐节生成），onDelta 逐段回调
- * - chatJSONStream() 流式 JSON 调用（课时规划等结构化场景；长请求保持字节流动，
- *   避免非流式长连接被代理掐断的 Failed to fetch）
- * - listModels() 拉取可用模型列表
- * - extractJSON / describeAIError / isAbortError 工具
+ * The unified interface:
+ * - chat()       a one-shot call (short requests, such as the connectivity test)
+ * - chatStream() SSE streaming (selection Q&A, lesson generation), with onDelta called per chunk
+ * - chatJSONStream() streaming JSON (structured work like lesson planning; a long request keeps
+ *   bytes flowing, avoiding the Failed to fetch a proxy hands a non-streaming long connection)
+ * - listModels() fetch the list of available models
+ * - extractJSON / describeAIError / isAbortError helpers
  */
 import type { AIProviderConfig } from '../types/ai'
 // The dictionary is read non-reactively here: these messages are built at throw
@@ -24,26 +24,26 @@ export interface ChatMessage {
 
 export interface ChatOptions {
   messages: ChatMessage[]
-  /** 尽力让输出为可 JSON.parse 的文本 */
+  /** Ask for output JSON.parse can handle */
   json?: boolean
   temperature?: number
-  /** 输出 token 上限（Anthropic 必需；OpenAI 兼容端点不传，用各自默认） */
+  /** Output token cap (required by Anthropic; left unset for OpenAI-compatible endpoints so each uses its own default) */
   maxTokens?: number
   signal?: AbortSignal
 }
 
 export interface StreamOptions extends ChatOptions {
   onDelta: (chunk: string) => void
-  /** 推理模型的思考过程增量（DeepSeek reasoning_content / Claude thinking_delta）；可为空 */
+  /** Reasoning deltas on reasoning models (DeepSeek reasoning_content / Claude thinking_delta); may be omitted */
   onReasoningDelta?: (chunk: string) => void
 }
 
-/* ───────── Agent：带工具调用的流式对话 ───────── */
+/* ───────── Agent: streaming chat with tool calls ───────── */
 
 export interface ToolSchema {
   name: string
   description: string
-  /** JSON Schema 形式的参数定义 */
+  /** The parameter definition, as a JSON Schema */
   input_schema: Record<string, unknown>
 }
 
@@ -53,7 +53,7 @@ export interface ToolCall {
   args: Record<string, unknown>
 }
 
-/** Agent 对话的中立消息形态（由适配器翻译为各协议格式） */
+/** Neutral message shape for agent conversations (each adapter translates it into its own protocol) */
 export type AgentMessage =
   | { role: 'system'; content: string }
   | { role: 'user'; content: string }
@@ -61,9 +61,9 @@ export type AgentMessage =
   | { role: 'tool'; id: string; name: string; content: string }
 
 export interface AgentTurn {
-  /** 本轮流式输出的文本（工具轮的叙述，或最终回答） */
+  /** This round's streamed text (a tool round's narration, or the final answer) */
   text: string
-  /** 本轮发起的工具调用；非空则由调用方执行后继续循环 */
+  /** Tool calls issued this round; when non-empty the caller runs them and the loop continues */
   toolCalls: ToolCall[]
 }
 
@@ -75,7 +75,7 @@ export interface AgentStreamOptions {
   onDelta?: (chunk: string) => void
 }
 
-/** 流式跑一轮带工具的对话；文本增量走 onDelta，工具调用增量在内部累积成完整调用 */
+/** Run one round of a tool-enabled conversation; text deltas go to onDelta while tool-call fragments accumulate into complete calls internally */
 export async function chatAgentStream(config: AIProviderConfig, opts: AgentStreamOptions): Promise<AgentTurn> {
   if (config.kind === 'anthropic') return chatAgentStreamAnthropic(config, opts)
   return chatAgentStreamOpenAICompatible(config, opts)
@@ -117,7 +117,7 @@ function toAnthropicMessages(messages: AgentMessage[]): Record<string, unknown>[
     }
   }
   for (const m of messages) {
-    if (m.role === 'system') continue // 由顶层 system 参数承载
+    if (m.role === 'system') continue // carried by the top-level system parameter
     if (m.role === 'tool') {
       pendingResults.push({ type: 'tool_result', tool_use_id: m.id, content: m.content })
       continue
@@ -163,7 +163,7 @@ async function chatAgentStreamOpenAICompatible(config: AIProviderConfig, opts: A
         text += delta.content
         opts.onDelta?.(delta.content)
       }
-      // 工具调用按分片到达：以 index 聚合，arguments 逐段拼接
+      // Tool calls arrive in fragments: aggregated by index, arguments concatenated piece by piece
       for (const tc of delta?.tool_calls ?? []) {
         const idx = typeof tc.index === 'number' ? tc.index : 0
         const cur = pending.get(idx) ?? { args: '' }
@@ -173,7 +173,7 @@ async function chatAgentStreamOpenAICompatible(config: AIProviderConfig, opts: A
         pending.set(idx, cur)
       }
     } catch {
-      // 心跳/注释等非 JSON 载荷，静默跳过
+      // A non-JSON payload (a heartbeat or comment): skipped silently
     }
   })
   const toolCalls: ToolCall[] = []
@@ -229,7 +229,7 @@ async function chatAgentStreamAnthropic(config: AIProviderConfig, opts: AgentStr
         }
       }
     } catch {
-      // 非 JSON 行，跳过
+      // Not a JSON line, so skip it
     }
   })
   const toolCalls: ToolCall[] = []
@@ -240,7 +240,7 @@ async function chatAgentStreamAnthropic(config: AIProviderConfig, opts: AgentStr
   return { text, toolCalls }
 }
 
-/** 带 HTTP 状态的 AI 调用错误（供 describeAIError 分类给用户文案） */
+/** An AI call error carrying the HTTP status (describeAIError turns it into user-facing copy) */
 export class AIError extends Error {
   status?: number
   constructor(message: string, status?: number) {
@@ -253,34 +253,34 @@ export function isAbortError(e: unknown): boolean {
   return e instanceof DOMException && e.name === 'AbortError'
 }
 
-/** 调用 AI，返回完整文本 */
+/** Call the AI and return the complete text */
 export async function chat(config: AIProviderConfig, opts: ChatOptions): Promise<string> {
   if (config.kind === 'anthropic') return chatAnthropic(config, opts)
   return chatOpenAICompatible(config, opts)
 }
 
-/** 流式调用：onDelta 逐段回调，resolve 为拼接后的完整文本 */
+/** Streaming call: onDelta fires per chunk and the promise resolves to the concatenated full text */
 export async function chatStream(config: AIProviderConfig, opts: StreamOptions): Promise<string> {
   if (config.kind === 'anthropic') return chatStreamAnthropic(config, opts)
   return chatStreamOpenAICompatible(config, opts)
 }
 
-/** 流式 JSON 调用：强制 JSON 输出（OpenAI response_format / Anthropic tool_choice），
- *  但以 SSE 流式承载——长请求保持字节流动，不被中间层掐断，onDelta 可实时上屏 */
+/** Streaming JSON call: forces JSON output (OpenAI response_format / Anthropic tool_choice),
+ *  but carries it over SSE — a long request keeps bytes flowing, no intermediary cuts it off, and onDelta can paint live */
 export async function chatJSONStream(config: AIProviderConfig, opts: StreamOptions): Promise<string> {
   if (config.kind === 'anthropic') return chatJSONStreamAnthropic(config, opts)
   return chatJSONStreamOpenAICompatible(config, opts)
 }
 
-/* ───────── OpenAI 兼容 ───────── */
+/* ───────── OpenAI-compatible ───────── */
 
-/** 连接阶段超时：发出请求后这么久仍未收到响应头才判失败。部分网关要等到模型首字才回
- *  响应头（缓冲型中转）、推理模型首字也慢，故给足 3 分钟；真正不可达的端点 TCP 层几秒内即报错。
- *  响应头到达后立刻解除，之后由 SSE 空闲看门狗接管——不限制生成总时长。 */
+/** Connect-phase timeout: a request fails only when no response headers have arrived this long after sending. Some gateways do not return
+ *  headers until the model produces its first token (buffering relays), and reasoning models are slow to start, so three minutes is generous. A genuinely unreachable endpoint errors at the TCP layer within seconds.
+ *  The timeout lifts the moment headers arrive; the SSE idle watchdog takes over from there, so total generation time is never capped. */
 const CONNECT_TIMEOUT_MS = 180_000
 
-/** fetch + 连接阶段超时；外部 signal 在整个请求生命周期内转发——包括流式 body 读取阶段
- *  （用户点「停止」必须能掐断已建立的流），连接超时仅在响应头到达前生效 */
+/** fetch plus the connect-phase timeout; the external signal is forwarded for the whole life of the request, the streaming body read included
+ *  (tapping Stop must be able to cut an established stream); the connect timeout only applies before headers arrive */
 async function fetchAI(url: string, init: RequestInit): Promise<Response> {
   const external = init.signal
   const ctrl = new AbortController()
@@ -294,7 +294,7 @@ async function fetchAI(url: string, init: RequestInit): Promise<Response> {
     return await fetch(url, { ...init, signal: ctrl.signal })
   } finally {
     clearTimeout(timer)
-    // 有意不移除 onAbort：响应头之后外部 abort 仍须能中止流式 body（监听器随请求对象一并回收）
+    // onAbort is deliberately left in place: after the headers an external abort must still be able to stop the streaming body (the listener is collected with the request object anyway)
   }
 }
 
@@ -320,8 +320,8 @@ async function chatOpenAICompatible(config: AIProviderConfig, opts: ChatOptions)
   }
   return withDeadline(CHAT_DEADLINE_MS, 'API', opts.signal, async (sig) => {
     let res = await postOpenAI(config, buildBody(!!opts.json), sig)
-    // 部分端点/模型不支持 response_format（对 json_object 报 400）：去掉后重试一次，
-    // system prompt 已强制"只输出 JSON"，由 extractJSON 容错解析
+    // Some endpoints/models do not support response_format (they 400 on json_object): drop it and retry once;
+    // the system prompt already insists on JSON only, and extractJSON parses it leniently
     if (!res.ok && res.status === 400 && opts.json) {
       res = await postOpenAI(config, buildBody(false), sig)
     }
@@ -348,18 +348,18 @@ async function chatStreamOpenAICompatible(config: AIProviderConfig, opts: Stream
     if (data === '[DONE]') return
     try {
       const json = JSON.parse(data)
-      // 兼容 delta.content 与 message.content（部分网关流式下仍回 message）
+      // Handles both delta.content and message.content (some gateways still send message while streaming)
       const choice = json?.choices?.[0]
       const delta = choice?.delta?.content ?? choice?.message?.content ?? ''
       if (typeof delta === 'string' && delta) {
         full += delta
         opts.onDelta(delta)
       }
-      // 推理模型的思考增量（DeepSeek reasoning_content 等）
+      // Reasoning deltas on reasoning models (DeepSeek's reasoning_content and friends)
       const reasoning = choice?.delta?.reasoning_content
       if (typeof reasoning === 'string' && reasoning) opts.onReasoningDelta?.(reasoning)
     } catch {
-      // 心跳/注释等非 JSON 载荷，静默跳过
+      // A non-JSON payload (a heartbeat or comment): skipped silently
     }
   })
   if (!full) throw new AIError(tr().aiError.emptyBody)
@@ -377,8 +377,8 @@ async function chatJSONStreamOpenAICompatible(config: AIProviderConfig, opts: St
     if (json) b.response_format = { type: 'json_object' }
     return b
   }
-  // 部分端点/模型不支持 response_format（对 json_object 报 400）：去掉后重试一次，
-  // system prompt 已强制"只输出 JSON"，由 extractJSON 容错解析
+  // Some endpoints/models do not support response_format (they 400 on json_object): drop it and retry once;
+  // the system prompt already insists on JSON only, and extractJSON parses it leniently
   let res = await postOpenAI(config, buildBody(true), opts.signal)
   if (!res.ok && res.status === 400) {
     await res.body?.cancel().catch(() => {})
@@ -397,7 +397,7 @@ async function chatJSONStreamOpenAICompatible(config: AIProviderConfig, opts: St
         opts.onDelta(delta)
       }
     } catch {
-      // 心跳/注释等非 JSON 载荷，静默跳过
+      // A non-JSON payload (a heartbeat or comment): skipped silently
     }
   })
   if (!full) throw new AIError(tr().aiError.emptyText)
@@ -426,7 +426,7 @@ async function chatAnthropic(config: AIProviderConfig, opts: ChatOptions): Promi
     system,
     messages,
   }
-  // 强制 JSON：用 tool_use 承载（Claude 对纯提示的 JSON 服从性不稳定）
+  // Forcing JSON: carried by a tool_use (Claude follows a prompt-only JSON request unreliably)
   if (opts.json) {
     body.tools = [{
       name: 'emit_json',
@@ -445,7 +445,7 @@ async function chatAnthropic(config: AIProviderConfig, opts: ChatOptions): Promi
     })
     if (!res.ok) throw await toAIError(res, 'Anthropic')
     const data = await res.json()
-    // 强制 tool_choice 下 Claude 仍可能先吐文本前导，必须优先取 tool_use 块
+    // Even with a forced tool_choice Claude may emit a text preamble first, so the tool_use block has to win
     let text: string | null = null
     for (const block of data?.content ?? []) {
       if (block.type === 'tool_use' && block.input) return JSON.stringify(block.input)
@@ -480,7 +480,7 @@ async function chatStreamAnthropic(config: AIProviderConfig, opts: StreamOptions
   await consumeSSE(res, (data) => {
     try {
       const json = JSON.parse(data)
-      // 只取正文增量；ping / message_start / message_delta(用量) 等一律忽略
+      // Only the body deltas; ping / message_start / message_delta (usage) and the rest are ignored
       if (json?.type === 'content_block_delta' && json?.delta?.type === 'text_delta' && typeof json.delta.text === 'string') {
         full += json.delta.text
         opts.onDelta(json.delta.text)
@@ -488,15 +488,15 @@ async function chatStreamAnthropic(config: AIProviderConfig, opts: StreamOptions
         opts.onReasoningDelta?.(json.delta.thinking)
       }
     } catch {
-      // 非 JSON 行，跳过
+      // Not a JSON line, so skip it
     }
   })
   if (!full) throw new AIError(tr().aiError.anthropicEmpty)
   return full
 }
 
-/** 流式 + 强制 JSON：tool_use 承载（Claude 对纯提示的 JSON 服从性不稳定），
- *  input_json_delta 逐段拼出 JSON 文本；流式保持连接活性 */
+/** Streaming plus forced JSON: carried by a tool_use (Claude follows a prompt-only JSON request unreliably),
+ *  with input_json_delta assembling the JSON text piece by piece; streaming keeps the connection alive */
 async function chatJSONStreamAnthropic(config: AIProviderConfig, opts: StreamOptions): Promise<string> {
   const system = opts.messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n\n')
   const messages = opts.messages.filter((m) => m.role !== 'system').map((m) => ({ role: m.role, content: m.content }))
@@ -527,7 +527,7 @@ async function chatJSONStreamAnthropic(config: AIProviderConfig, opts: StreamOpt
   await consumeSSE(res, (data) => {
     try {
       const json = JSON.parse(data)
-      // JSON 由 tool_use 块的 input_json_delta 逐段承载；text 前导若有也收下（extractJSON 容错）
+      // The JSON rides in on the tool_use block's input_json_delta; a text preamble, if any, is taken too (extractJSON is lenient)
       if (json?.type === 'content_block_delta' && json?.delta?.type === 'input_json_delta' && typeof json.delta.partial_json === 'string') {
         full += json.delta.partial_json
         opts.onDelta(json.delta.partial_json)
@@ -535,24 +535,24 @@ async function chatJSONStreamAnthropic(config: AIProviderConfig, opts: StreamOpt
         opts.onDelta(json.delta.text)
       }
     } catch {
-      // 非 JSON 行，跳过
+      // Not a JSON line, so skip it
     }
   })
   if (!full) throw new AIError(tr().aiError.anthropicEmpty)
   return full
 }
 
-/* ───────── SSE 解析 ───────── */
+/* ───────── SSE parsing ───────── */
 
-/** 流空闲上限：持续这么久没收到任何字节才判定连接被对端挂起，主动断开（推理模型思考间隙可很长，故给足 10 分钟） */
+/** Stream idle limit: the connection counts as hung by the far end only after this long with no bytes at all, and is dropped (reasoning models can pause for a long time, hence ten minutes) */
 const SSE_IDLE_MS = 600_000
 
-/** 带空闲看门狗的单次 read：超时后取消流并抛错，避免 fetch 永久挂起 */
+/** A single read guarded by the idle watchdog: on timeout it cancels the stream and throws, so fetch can never hang forever */
 async function readWithIdleGuard(
   reader: ReadableStreamDefaultReader<Uint8Array>,
 ): Promise<ReadableStreamReadResult<Uint8Array>> {
   const read = reader.read()
-  read.catch(() => {}) // 看门狗胜出后 reader.cancel() 会让 read 拒绝，预挂空 catch 防未处理拒绝
+  read.catch(() => {}) // When the watchdog wins, reader.cancel() makes read reject; the empty catch is attached up front to avoid an unhandled rejection
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
     return await Promise.race([
@@ -572,7 +572,7 @@ async function readWithIdleGuard(
   }
 }
 
-/** 消费 SSE 响应体：逐行抽出 data: 载荷回调（event:/注释/空行两类协议都不需要） */
+/** Consume an SSE response body: pull out each data: payload and call back (neither protocol needs event:, comments or blank lines) */
 async function consumeSSE(res: Response, onData: (data: string) => void): Promise<void> {
   const reader = res.body?.getReader()
   if (!reader) throw new AIError(tr().aiError.noStream)
@@ -595,12 +595,12 @@ async function consumeSSE(res: Response, onData: (data: string) => void): Promis
   if (buf) handleLine(buf.replace(/\r$/, ''))
 }
 
-/* ───────── 错误与工具 ───────── */
+/* ───────── Errors and helpers ───────── */
 
-/** 非流式调用的整体超时：非流没有逐字节可观测，只能按时长兜底（到点中止请求并抛错） */
+/** Overall timeout for a non-streaming call: with no byte-by-byte signal to watch, a duration is the only backstop (at which point the request is aborted and an error thrown) */
 const CHAT_DEADLINE_MS = 600_000
 
-/** 在时限内执行一个接收 signal 的异步任务；超时以 AIError 中止底层请求，外部 signal 同步转发 */
+/** Run an async task that takes a signal within a time limit; on timeout the underlying request is aborted with an AIError, and the external signal is forwarded alongside */
 async function withDeadline<T>(
   ms: number,
   label: string,
@@ -651,7 +651,7 @@ function trimSlash(s: string): string {
   return s.replace(/\/+$/, '')
 }
 
-/** 从 AI 文本中尽力提取 JSON（兼容 ```json 包裹与前后缀噪声） */
+/** Best-effort JSON extraction from AI text (tolerating a ```json wrapper and surrounding chatter) */
 export function extractJSON(raw: string): string {
   let s = raw.trim()
   if (s.startsWith('```')) {
@@ -663,7 +663,7 @@ export function extractJSON(raw: string): string {
   return s
 }
 
-/* ───────── 拉取可用模型列表 ───────── */
+/* ───────── Fetching the model list ───────── */
 
 export async function listModels(config: AIProviderConfig): Promise<string[]> {
   if (config.kind === 'anthropic') {
