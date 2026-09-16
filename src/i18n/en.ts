@@ -556,6 +556,9 @@ export const en: Dict = {
     mark: 'M',
     markHint: 'Highlight and take a note (no AI)',
     markLabel: 'Highlight and take a note',
+    /** Spelled out, for the touch bar where there is room for words */
+    askAction: 'Ask AI',
+    markAction: 'Highlight and note',
   },
 
   aiError: {

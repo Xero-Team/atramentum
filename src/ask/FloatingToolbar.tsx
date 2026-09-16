@@ -1,20 +1,19 @@
-// The floating toolbar for a text selection: two little seals — "ask" (Ask AI)
-// and "mark" (highlight + note, no AI) — pop up beside the selection.
+// The two actions for a text selection: "ask" (Ask AI) and "mark" (highlight +
+// note, no AI).
 //
-// On a phone the platform draws an unmissable menu of its own against the
-// selection (Copy / Share / Select all / Translate) and will happily sit on top of
-// ours. It cannot be measured or asked where it is — it is not in our DOM — so we
-// go by its habit instead: Android puts that bar *below* the selection, iOS puts
-// its callout *above*, and we take the opposite side. If that side has no room we
-// take the platform's side anyway but far enough out to clear its menu rather than
-// hide underneath it.
+// Two shapes, because the platform behaves differently:
+//  - A mouse gets the little pair of seals that pops up beside the selection.
+//  - A finger gets a bar pinned to the bottom of the screen. On a phone the
+//    platform draws its own Copy / Share / Select all menu against the selection,
+//    and it cannot be measured or asked where it is — it is not in our DOM. It
+//    only ever appears next to the selection, though, so a bar at the bottom of
+//    the screen is somewhere it never goes, and it lands under the thumb rather
+//    than under the finger that is already covering the text.
 import { useLayoutEffect, useRef, useState } from 'react'
-import { isAppleTouch, isTouchDevice } from '../platform'
+import { isTouchDevice } from '../platform'
 import { useI18n } from '../i18n'
 
 const GAP = 8
-/** Roughly the height of the platform's own selection menu, plus a little air */
-const MENU_CLEARANCE = 64
 
 export function FloatingToolbar({
   x,
@@ -32,40 +31,44 @@ export function FloatingToolbar({
   onMark: () => void
 }) {
   const { t } = useI18n()
+  const [touch] = useState(isTouchDevice)
   const ref = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null)
 
-  // Measure rather than hard-code: the buttons differ in size between touch and
-  // mouse, so a fixed guess would land in the wrong place.
+  // Measure rather than hard-code: the seals are a fixed size, but hard-coding the
+  // offset would still land them in the wrong place under a different font. The
+  // bottom bar is pinned, so there is nothing to work out.
   useLayoutEffect(() => {
+    if (touch) return
     const el = ref.current
     if (!el) return
     const { offsetWidth: w, offsetHeight: h } = el
     const vw = window.innerWidth
     const vh = window.innerHeight
-    const left = Math.max(GAP, Math.min(x, vw - w - GAP))
+    setPos({
+      left: Math.max(GAP, Math.min(x, vw - w - GAP)),
+      top: Math.max(GAP, Math.min(y + GAP, vh - h - GAP)),
+    })
+  }, [touch, x, y, selTop])
 
-    let top: number
-    if (!isTouchDevice()) {
-      // A mouse has no platform menu to dodge, so tuck it under the selection's bottom-right
-      top = y + GAP
-    } else {
-      const above = selTop - h - GAP
-      const below = y + GAP
-      const fitsAbove = above >= GAP
-      const fitsBelow = below + h <= vh - GAP
-      // Android's bar is below the selection, so ours goes above; on iOS the callout
-      // is above, so ours goes below
-      const weWantAbove = !isAppleTouch()
-      if (weWantAbove && fitsAbove) top = above
-      else if (!weWantAbove && fitsBelow) top = below
-      else if (weWantAbove && fitsBelow) top = below + MENU_CLEARANCE
-      else if (!weWantAbove && fitsAbove) top = above - MENU_CLEARANCE
-      else top = weWantAbove ? above : below
-    }
-
-    setPos({ left, top: Math.max(GAP, Math.min(top, vh - h - GAP)) })
-  }, [x, y, selTop])
+  if (touch) {
+    return (
+      <div className="fixed inset-x-0 bottom-0 z-40 flex items-stretch gap-2 border-t border-ink/15 bg-paper px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-paper">
+        <button
+          className="flex-1 bg-cinnabar px-3 py-3 text-sm font-bold text-paper transition active:bg-cinnabar-deep"
+          onClick={onAsk}
+        >
+          {t.toolbar.askAction}
+        </button>
+        <button
+          className="flex-1 border border-ink/25 px-3 py-3 text-sm font-bold text-ink-soft transition active:border-cinnabar active:text-cinnabar-deep"
+          onClick={onMark}
+        >
+          {t.toolbar.markAction}
+        </button>
+      </div>
+    )
+  }
 
   return (
     <div
@@ -76,7 +79,7 @@ export function FloatingToolbar({
       style={pos ? { left: pos.left, top: pos.top } : { left: -9999, top: -9999 }}
     >
       <button
-        className="h-11 w-11 bg-cinnabar font-song text-base font-bold text-paper transition hover:bg-cinnabar-deep md:h-9 md:w-9 md:text-sm"
+        className="h-9 w-9 bg-cinnabar font-song text-sm font-bold text-paper transition hover:bg-cinnabar-deep"
         onPointerDown={(e) => e.preventDefault() /* keep the selection highlighted */}
         onClick={onAsk}
         title={t.toolbar.askHint}
@@ -85,7 +88,7 @@ export function FloatingToolbar({
         {t.toolbar.ask}
       </button>
       <button
-        className="h-11 w-11 border border-l-0 border-ink/25 bg-paper font-song text-base font-bold text-ink-soft transition hover:border-cinnabar/60 hover:text-cinnabar-deep md:h-9 md:w-9 md:text-sm"
+        className="h-9 w-9 border border-l-0 border-ink/25 bg-paper font-song text-sm font-bold text-ink-soft transition hover:border-cinnabar/60 hover:text-cinnabar-deep"
         onPointerDown={(e) => e.preventDefault()}
         onClick={onMark}
         title={t.toolbar.markHint}

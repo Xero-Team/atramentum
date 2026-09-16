@@ -552,7 +552,7 @@ export const zh = {
     footer: '记录只存本机；导出 zip 时会连同标注一起打包，导入同一本书即可复原。',
   },
 
-  /** The two seal buttons that float next to a text selection. */
+  /** The two actions on a selection: floating seals with a mouse, a bottom bar on touch. */
   toolbar: {
     ask: '问',
     askHint: '就这段问 AI（对话会连标注一起存下来）',
@@ -560,6 +560,9 @@ export const zh = {
     mark: '标',
     markHint: '高亮并记笔记（不上 AI）',
     markLabel: '标注并记笔记',
+    /** Spelled out, for the touch bar where there is room for words */
+    askAction: '问 AI',
+    markAction: '标注并记笔记',
   },
 
   /**
