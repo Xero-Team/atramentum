@@ -155,7 +155,7 @@ jobs:
           ls -lh "$APK"
           BT=$(ls -d "$ANDROID_HOME"/build-tools/*/ | tail -1)
           "${BT}apksigner" verify --print-certs "$APK"
-          "${BT}aapt2" dump badging "$APK" | grep -E "^package|^application-label:|^sdkVersion|^native-code" || true
+          "${BT}aapt2" dump badging "$APK" | grep -E "^package|^application-label:|^sdkVersion|^native-code|^uses-permission" || true
 
           # The fingerprint is the only proof the signing is consistent: if two builds
           # in a row disagree, the keystore cache above has broken again (which is what
