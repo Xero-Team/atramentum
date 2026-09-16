@@ -3,6 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <!-- iOS 不认 manifest 里的图标，主屏图标走 apple-touch-icon -->
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <!-- 装到主屏后以独立窗口打开，不再有浏览器地址栏。
+         iOS 认 apple-mobile-web-app-capable，Android / 桌面认 manifest 的 display -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <!-- default：状态栏不透明、应用内容从状态栏下方开始。若改 black-translucent，
+         页面会穿到状态栏底下，必须给所有根节点补 env(safe-area-inset-top)，目前没做 -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="墨痕" />
     <!-- viewport-fit=cover：让 env(safe-area-inset-*) 可用（刘海 / 底部指示条避让）；
          interactive-widget=resizes-content：软键盘弹出时压缩布局视口，
          否则 h-dvh 的盒子底部会被键盘盖住 -->
