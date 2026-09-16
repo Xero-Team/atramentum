@@ -346,11 +346,18 @@ export default function Bookshelf() {
       const name = categoryAt(x, y)
       setDropTarget((cur) => (cur === name ? cur : name))
     },
-    onDrop: (id, x, y) => {
-      const name = categoryAt(x, y)
+    // Runs for a drop and for a cancel alike: whatever ended the drag, the ghost
+    // has to go away rather than sit frozen where the gesture died
+    onEnd: (id, drop) => {
       setDropTarget(null)
-      if (touchGhostRef.current) touchGhostRef.current.innerHTML = ''
-      // Let go over empty space → leave the card where it was
+      const ghost = touchGhostRef.current
+      if (ghost) {
+        ghost.innerHTML = ''
+        ghost.style.transform = 'translate3d(-9999px, -9999px, 0)'
+      }
+      // Let go over empty space, or the drag was cancelled → leave the card where it was
+      if (!drop) return
+      const name = categoryAt(drop.x, drop.y)
       if (name) assignTo(id, name === UNCATEGORIZED ? '' : name)
     },
   })

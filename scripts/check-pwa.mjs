@@ -360,7 +360,11 @@ try {
   // drag-and-drop at all so the shelf needs a gesture of its own. Both broke in the
   // field while this script stayed green, hence this section.
   const tap = (x, y, type) =>
-    send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y }] })
+    send('Input.dispatchTouchEvent', {
+      type,
+      // A cancel and an end both have no points left; only start and move carry one
+      touchPoints: type === 'touchStart' || type === 'touchMove' ? [{ x, y }] : [],
+    })
   await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 3, mobile: true })
   await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 })
 
@@ -395,6 +399,32 @@ try {
     await sleep(1000)
     check('tapping a card opens it', (await evaluate(`location.hash`)).includes('/c/'), await evaluate(`location.hash`))
 
+    // On a phone the two selection actions are a bar pinned to the bottom of the
+    // screen, not the little pair of seals — the platform's own Copy/Share menu
+    // lives next to the selection and used to sit on top of them
+    await waitFor(() => evaluate(`!!document.querySelector('.prose p')`), { label: 'course open' })
+    await sleep(600)
+    await evaluate(`(() => {
+      const p = [...document.querySelectorAll('.prose p')].find(e => e.textContent.trim().length > 40)
+      if (!p || !p.firstChild) return 'no paragraph'
+      const r = document.createRange(); r.setStart(p.firstChild, 0); r.setEnd(p.firstChild, Math.min(18, p.firstChild.length))
+      const s = window.getSelection(); s.removeAllRanges(); s.addRange(r)
+      document.dispatchEvent(new Event('selectionchange'))
+      return 'ok'
+    })()`)
+    await sleep(700)
+    const bar = await evaluate(`(() => {
+      // The reader header also has a 问 AI button, so key off the mark action, which
+      // only the touch bar spells out
+      const b = [...document.querySelectorAll('button')].find(e => e.textContent.trim() === '标注并记笔记')
+      if (!b) return null
+      const r = b.parentElement.getBoundingClientRect()
+      return { bottom: Math.round(r.bottom), vh: innerHeight, labels: [...b.parentElement.querySelectorAll('button')].map(e => e.textContent.trim()) }
+    })()`)
+    check('selecting text on a phone raises a bar pinned to the bottom of the screen',
+      !!bar && bar.bottom >= bar.vh - 1 && bar.labels.length === 2,
+      JSON.stringify(bar))
+
     await send('Page.navigate', { url: APP })
     await waitFor(() => evaluate(`document.readyState === 'complete' && !!document.querySelector('h1')`), { label: 'back on the shelf' })
     await sleep(1000)
@@ -426,6 +456,31 @@ try {
       lifted === true && highlighted === true && assign.length === 1 && assign[0] === '学习',
       `lifted=${lifted} highlighted=${highlighted} assign=${JSON.stringify(assign)}`)
     check('and the drag does not also open the course', !(await evaluate(`location.hash`)).includes('/c/'))
+
+    // A drag that dies mid-flight (the platform takes the gesture back, a system
+    // sheet opens) must not leave the ghost frozen on screen — that reads as the
+    // whole shelf having locked up
+    await send('Page.navigate', { url: APP })
+    await waitFor(() => evaluate(`document.readyState === 'complete' && !!document.querySelector('h1')`), { label: 'back on the shelf' })
+    await sleep(900)
+    await evaluate(`document.querySelector('main .grid > div').scrollIntoView({ block: 'center' })`)
+    await sleep(400)
+    const again = await evaluate(
+      `(() => { const c = document.querySelector('main .grid > div').getBoundingClientRect(); return { x: Math.round(c.x + c.width / 2), y: Math.round(c.y + 24) } })()`,
+    )
+    await tap(again.x, again.y, 'touchStart')
+    await sleep(600)
+    await tap(again.x, again.y, 'touchMove')
+    await tap(0, 0, 'touchCancel')
+    await sleep(400)
+    const afterCancel = await evaluate(`(() => ({
+      ghost: document.querySelector('main > div[aria-hidden]').innerHTML.length,
+      lifted: !!document.querySelector('main .grid > div.opacity-40'),
+      highlighted: [...document.querySelectorAll('[data-drop-category]')].some(e => e.className.includes('border-cinnabar/60')),
+    }))()`)
+    check('a cancelled drag leaves no ghost behind and stops the card being lifted',
+      afterCancel.ghost === 0 && afterCancel.lifted === false && afterCancel.highlighted === false,
+      JSON.stringify(afterCancel))
   }
 } catch (e) {
   check(`threw: ${e.message}`, false)
