@@ -1,26 +1,31 @@
 /**
- * 设置 store：AI 端点与密钥（BYO，存 localStorage，仅本机）。
- * 密钥从不进入课件数据，从不随导出文件流出。
+ * Settings store: AI endpoint + key (bring-your-own-key), UI theme and language.
+ * Persisted to localStorage, never leaves the device. The API key never enters
+ * course data and never travels inside an exported file.
  */
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import type { AIProviderConfig } from '../types/ai'
 import { PRESET_ENDPOINTS } from '../types/ai'
+import { detectLang } from '../i18n/detect'
+import type { Lang } from '../i18n/detect'
 
-/** 外观：浅色 / 深色 / 跟随系统（实际换肤逻辑见 ./theme.ts） */
+/** Appearance: light / dark / follow system (the actual switching lives in ./theme.ts) */
 export type ThemeMode = 'light' | 'dark' | 'system'
 
 interface SettingsState {
   ai: AIProviderConfig
-  /** 关联的预置端点 id（自定义时为 'custom'） */
+  /** Which preset endpoint the current baseURL belongs to; 'custom' when hand-edited */
   presetId: string
   theme: ThemeMode
+  lang: Lang
   setAIPreset: (presetId: string) => void
   setAIConfig: (patch: Partial<AIProviderConfig>) => void
   setTheme: (theme: ThemeMode) => void
+  setLang: (lang: Lang) => void
 }
 
-const defaultPreset = PRESET_ENDPOINTS[0] // DeepSeek：国内可用性最好，作为默认
+const defaultPreset = PRESET_ENDPOINTS[0] // DeepSeek: most reliable from mainland China, hence the default
 
 export const useSettingsStore = create<SettingsState>()(
   persist(
@@ -33,6 +38,8 @@ export const useSettingsStore = create<SettingsState>()(
       },
       presetId: defaultPreset.id,
       theme: 'light',
+      // Resolved once at first run from the browser, then persisted as an explicit choice.
+      lang: detectLang(),
       setAIPreset: (presetId) => {
         const p = PRESET_ENDPOINTS.find((e) => e.id === presetId) ?? defaultPreset
         set({
@@ -40,13 +47,14 @@ export const useSettingsStore = create<SettingsState>()(
           ai: {
             kind: p.kind,
             baseURL: p.baseURL,
-            apiKey: '', // 切换预置时清空 key，避免误用上一家的密钥
+            apiKey: '', // clear the key when switching providers, so the old one can't leak into a new endpoint
             model: p.defaultModel,
           },
         })
       },
       setAIConfig: (patch) => set((s) => ({ ai: { ...s.ai, ...patch } })),
       setTheme: (theme) => set({ theme }),
+      setLang: (lang) => set({ lang }),
     }),
     {
       name: 'moxue-settings',

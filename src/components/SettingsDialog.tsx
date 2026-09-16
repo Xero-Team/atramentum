@@ -1,34 +1,48 @@
-// 设置对话框：AI 端点（预设或自填地址）+ 密钥 + 模型，连通测试。
-// 全部即时写入 settingsStore（localStorage），无独立"保存"按钮。
+// Settings dialog: AI endpoint (preset or hand-written), key, model, connectivity
+// test — plus appearance and language. Everything writes straight into
+// settingsStore (localStorage); there is no separate "save" button.
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { PRESET_ENDPOINTS } from '../types/ai'
 import { chat, describeAIError, isAbortError, listModels } from '../ai/providers'
 import { useSettingsStore } from '../store/settingsStore'
 import type { ThemeMode } from '../store/settingsStore'
+import { LANG_LABEL, LANGS, useI18n } from '../i18n'
 import { promptInstall, useInstallState } from '../pwa/install'
 import { Overlay } from './common/Overlay'
 
 const inputCls =
   'w-full border border-ink/20 bg-paper px-2.5 py-1.5 text-sm text-ink outline-none transition focus:border-cinnabar'
 
-/** 小按钮统一补一点纵向内边距：桌面 28px、触屏 32px，够手指点 */
-const miniBtn = 'shrink-0 border border-ink/20 px-2.5 py-1.5 text-xs leading-4 text-ink-soft transition hover:border-cinnabar/50 hover:text-cinnabar-deep md:py-1'
+/** Shared shape for the small secondary buttons: 28px tall on desktop, 32px on touch. */
+const miniBtn =
+  'shrink-0 border border-ink/20 px-2.5 py-1.5 text-xs leading-4 text-ink-soft transition hover:border-cinnabar/50 hover:text-cinnabar-deep md:py-1'
 
-const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
-  { value: 'light', label: '浅色' },
-  { value: 'dark', label: '深色' },
-  { value: 'system', label: '跟随系统' },
-]
+/** Segmented control used by both the theme and the language picker. */
+function segmentCls(active: boolean): string {
+  return `flex-1 border px-3 py-2 text-xs transition sm:flex-none sm:px-5 ${
+    active
+      ? 'border-cinnabar bg-cinnabar text-paper'
+      : 'border-ink/20 text-ink-soft hover:border-cinnabar/50 hover:text-cinnabar-deep'
+  }`
+}
 
 export function SettingsDialog({ onClose }: { onClose: () => void }) {
+  const { lang, t } = useI18n()
   const ai = useSettingsStore((s) => s.ai)
   const setAIConfig = useSettingsStore((s) => s.setAIConfig)
   const setAIPreset = useSettingsStore((s) => s.setAIPreset)
   const theme = useSettingsStore((s) => s.theme)
   const setTheme = useSettingsStore((s) => s.setTheme)
+  const setLang = useSettingsStore((s) => s.setLang)
   const install = useInstallState()
 
-  // 当前 baseURL 命中哪个预设；都没中即「自定义」
+  const themeOptions: { value: ThemeMode; label: string }[] = [
+    { value: 'light', label: t.common.themeLight },
+    { value: 'dark', label: t.common.themeDark },
+    { value: 'system', label: t.common.themeSystem },
+  ]
+
+  // Which preset the current baseURL matches; anything else counts as "custom"
   const effectivePreset = useMemo(
     () => PRESET_ENDPOINTS.find((p) => p.baseURL === ai.baseURL)?.id ?? 'custom',
     [ai.baseURL],
@@ -44,19 +58,19 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const [testing, setTesting] = useState(false)
   const [testMsg, setTestMsg] = useState<{ ok: boolean; text: string } | null>(null)
 
-  // 下拉候选：优先用刚拉取的真实列表，否则退回预设内置的常见模型
+  // Candidates: the freshly fetched list when we have one, otherwise the preset's built-ins
   const modelOptions = useMemo(
     () => (modelList.length ? modelList : preset?.models ?? []),
     [modelList, preset],
   )
 
-  // 换端点后旧列表已失效，清掉并收起
+  // A different endpoint invalidates the old list — drop it and close the dropdown
   useEffect(() => {
     setModelList([])
     setModelOpen(false)
   }, [ai.baseURL])
 
-  // 点击下拉区域之外时收起
+  // Close the dropdown when clicking outside it
   useEffect(() => {
     if (!modelOpen) return
     const onDown = (e: PointerEvent) => {
@@ -68,7 +82,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
 
   const fetchModels = async () => {
     if (!ai.apiKey) {
-      setFetchMsg('请先填写 API Key')
+      setFetchMsg(t.settings.needKeyFirst)
       return
     }
     setFetching(true)
@@ -76,8 +90,8 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     try {
       const ids = await listModels(ai)
       setModelList(ids)
-      setFetchMsg(ids.length ? `取到 ${ids.length} 个模型` : '端点未返回模型列表，请手动填写')
-      if (ids.length) setModelOpen(true) // 拉到列表立即展开，免去再点一次
+      setFetchMsg(ids.length ? t.settings.gotModels(ids.length) : t.settings.noModelList)
+      if (ids.length) setModelOpen(true) // open right away so the list is one click away
       if (!ai.model && ids.length) setAIConfig({ model: ids[0] })
     } catch (e) {
       setFetchMsg(describeAIError(e))
@@ -91,12 +105,12 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     setTestMsg(null)
     try {
       const reply = await chat(ai, {
-        messages: [{ role: 'user', content: '请只回复两个字：连通' }],
+        messages: [{ role: 'user', content: t.settings.testProbe }],
         maxTokens: 256,
       })
-      setTestMsg({ ok: true, text: `连通成功：${reply.slice(0, 40)}` })
+      setTestMsg({ ok: true, text: t.settings.testOk(reply.slice(0, 40)) })
     } catch (e) {
-      setTestMsg({ ok: false, text: isAbortError(e) ? '已取消' : describeAIError(e) })
+      setTestMsg({ ok: false, text: isAbortError(e) ? t.settings.testCancelled : describeAIError(e) })
     } finally {
       setTesting(false)
     }
@@ -105,29 +119,26 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   return (
     <Overlay onClose={onClose} closeOnOverlay={false}>
       <div className="sticky top-0 z-10 flex items-center justify-between border-b border-ink/15 bg-paper px-5 py-3">
-        <h2 className="font-song text-base font-bold tracking-wide">设置</h2>
+        <h2 className="font-song text-base font-bold tracking-wide">{t.settings.title}</h2>
         <button
           className="-my-2 -mr-2 p-2 text-ink-faint transition hover:text-cinnabar"
           onClick={onClose}
-          aria-label="关闭"
+          aria-label={t.common.close}
         >
           ✕
         </button>
       </div>
 
-      {/* 滚动交给 Overlay 的面板，这里不再套一层，免得手机上出现双滚动条 */}
+      {/* Scrolling is the Overlay panel's job — nesting another scroller here
+          gives phones two scrollbars for no reason. */}
       <div className="space-y-5 p-5">
         <section>
-          <h3 className="mb-2 text-sm font-semibold text-ink">外观</h3>
+          <h3 className="mb-2 text-sm font-semibold text-ink">{t.settings.appearance}</h3>
           <div className="flex gap-2">
-            {THEME_OPTIONS.map((o) => (
+            {themeOptions.map((o) => (
               <button
                 key={o.value}
-                className={`flex-1 border px-3 py-2 text-xs transition sm:flex-none sm:px-5 ${
-                  theme === o.value
-                    ? 'border-cinnabar bg-cinnabar text-paper'
-                    : 'border-ink/20 text-ink-soft hover:border-cinnabar/50 hover:text-cinnabar-deep'
-                }`}
+                className={segmentCls(theme === o.value)}
                 onClick={() => setTheme(o.value)}
                 aria-pressed={theme === o.value}
               >
@@ -135,42 +146,51 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
               </button>
             ))}
           </div>
-          <p className="mt-1 text-xs text-ink-faint">
-            深色作水墨调：夜色般的墨底、宣纸白的字，青替朱砂作强调色。标题栏的 ☾ / ☀ 可随手切换。
-          </p>
+          <p className="mt-1 text-xs text-ink-faint">{t.settings.appearanceHint}</p>
         </section>
 
         <section>
-          <h3 className="mb-2 text-sm font-semibold text-ink">安装到桌面</h3>
-          {install === 'installed' && <p className="text-xs leading-6 text-ink-faint">✓ 已作为应用运行。</p>}
+          <h3 className="mb-2 text-sm font-semibold text-ink">{t.settings.language}</h3>
+          <div className="flex gap-2">
+            {LANGS.map((l) => (
+              <button
+                key={l}
+                className={segmentCls(lang === l)}
+                onClick={() => setLang(l)}
+                aria-pressed={lang === l}
+                lang={l === 'zh' ? 'zh-CN' : 'en'}
+              >
+                {LANG_LABEL[l]}
+              </button>
+            ))}
+          </div>
+          <p className="mt-1 text-xs text-ink-faint">{t.settings.languageHint}</p>
+        </section>
+
+        <section>
+          <h3 className="mb-2 text-sm font-semibold text-ink">{t.settings.installTitle}</h3>
+          {install === 'installed' && (
+            <p className="text-xs leading-6 text-ink-faint">{t.settings.installDone}</p>
+          )}
           {install === 'prompt' && (
             <>
               <button
                 className="bg-cinnabar px-4 py-2 text-sm text-paper transition hover:bg-cinnabar-deep md:py-1.5"
                 onClick={() => void promptInstall()}
               >
-                安装到桌面
+                {t.settings.installAction}
               </button>
-              <p className="mt-1 text-xs text-ink-faint">
-                全屏打开、不带浏览器地址栏；读过的书断网也能翻。问 AI 之类仍然需要联网。
-              </p>
+              <p className="mt-1 text-xs text-ink-faint">{t.settings.installHint}</p>
             </>
           )}
-          {install === 'ios' && (
-            <p className="text-xs leading-6 text-ink-faint">
-              在 Safari 点「分享」→「添加到主屏幕」，即可把墨痕当应用打开（iOS 不允许网页自己弹出安装）。
-            </p>
-          )}
+          {install === 'ios' && <p className="text-xs leading-6 text-ink-faint">{t.settings.installIos}</p>}
           {install === 'manual' && (
-            <p className="text-xs leading-6 text-ink-faint">
-              这个浏览器当前没给出安装入口。可以找找地址栏的安装图标或菜单里的「安装应用 / 添加到主屏幕」；
-              多数国产套壳浏览器不实现 PWA 安装，换 Chrome / Edge / Safari / 三星浏览器可以装。
-            </p>
+            <p className="text-xs leading-6 text-ink-faint">{t.settings.installManual}</p>
           )}
         </section>
 
         <section>
-          <h3 className="mb-2 text-sm font-semibold text-ink">服务商预设</h3>
+          <h3 className="mb-2 text-sm font-semibold text-ink">{t.settings.provider}</h3>
           <select
             className={inputCls}
             value={effectivePreset}
@@ -185,15 +205,13 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                 {p.label}
               </option>
             ))}
-            <option value="custom">自定义端点</option>
+            <option value="custom">{t.settings.providerCustom}</option>
           </select>
-          <p className="mt-1 text-xs text-ink-faint">
-            也可直接改下方请求地址接入任何 OpenAI 兼容端点。密钥仅存本机 localStorage，不会随导出文件流出。
-          </p>
+          <p className="mt-1 text-xs text-ink-faint">{t.settings.providerHint}</p>
         </section>
 
         <section>
-          <h3 className="mb-2 text-sm font-semibold text-ink">请求地址（baseURL）</h3>
+          <h3 className="mb-2 text-sm font-semibold text-ink">{t.settings.baseUrl}</h3>
           <input
             className={inputCls}
             placeholder="https://api.example.com/v1"
@@ -204,7 +222,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
         </section>
 
         <section>
-          <h3 className="mb-2 text-sm font-semibold text-ink">API Key</h3>
+          <h3 className="mb-2 text-sm font-semibold text-ink">{t.settings.apiKey}</h3>
           <div className="flex flex-wrap gap-2">
             <input
               className={`${inputCls} min-w-0 flex-1 basis-48`}
@@ -217,25 +235,26 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
               autoCorrect="off"
             />
             <button className={miniBtn} onClick={() => setShowKey((v) => !v)}>
-              {showKey ? '隐藏' : '显示'}
+              {showKey ? t.settings.hideKey : t.settings.showKey}
             </button>
             {preset && (
               <a className={miniBtn} href={preset.apiKeyURL} target="_blank" rel="noreferrer noopener">
-                获取密钥
+                {t.settings.getKey}
               </a>
             )}
           </div>
         </section>
 
         <section>
-          <h3 className="mb-2 text-sm font-semibold text-ink">模型</h3>
+          <h3 className="mb-2 text-sm font-semibold text-ink">{t.settings.model}</h3>
           <div className="flex flex-wrap gap-2">
-            {/* 自定义下拉：原生 datalist 在 Chrome 里点输入框不弹层、且按已填值过滤常导致空列表，不可控 */}
+            {/* Hand-rolled dropdown: the native datalist neither opens on click in
+                Chrome nor shows anything useful once a value is typed. */}
             <div
               ref={modelWrapRef}
               className="relative min-w-0 flex-1 basis-48"
               onKeyDown={(e) => {
-                // Esc 只收起下拉，不再让 Overlay 把整个设置关掉
+                // Esc closes only the dropdown, instead of letting the Overlay close all of Settings
                 if (e.key === 'Escape' && modelOpen) {
                   e.stopPropagation()
                   setModelOpen(false)
@@ -244,7 +263,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             >
               <input
                 className={`${inputCls} pr-7`}
-                placeholder="如 deepseek-chat / gpt-4o-mini / claude-sonnet-5"
+                placeholder={t.settings.modelPlaceholder}
                 value={ai.model}
                 onChange={(e) => setAIConfig({ model: e.target.value.trim() })}
                 onFocus={() => {
@@ -255,7 +274,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
               {modelOptions.length > 0 && (
                 <button
                   type="button"
-                  aria-label="展开模型列表"
+                  aria-label={t.settings.expandModels}
                   aria-expanded={modelOpen}
                   tabIndex={-1}
                   className="absolute right-1 top-1/2 -translate-y-1/2 px-2 py-1.5 text-xs text-ink-faint transition hover:text-cinnabar"
@@ -288,12 +307,8 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                 </ul>
               )}
             </div>
-            <button
-              className={`${miniBtn} disabled:opacity-50`}
-              onClick={fetchModels}
-              disabled={fetching}
-            >
-              {fetching ? '拉取中…' : '拉取模型列表'}
+            <button className={`${miniBtn} disabled:opacity-50`} onClick={fetchModels} disabled={fetching}>
+              {fetching ? t.settings.fetchingModels : t.settings.fetchModels}
             </button>
           </div>
           {fetchMsg && <p className="mt-1 text-xs text-ink-faint">{fetchMsg}</p>}
@@ -306,7 +321,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
               onClick={testConnection}
               disabled={testing || !ai.baseURL || !ai.model}
             >
-              {testing ? '测试中…' : '测试连通'}
+              {testing ? t.settings.testing : t.settings.test}
             </button>
             {testMsg && (
               <p className={`text-xs ${testMsg.ok ? 'text-ink-soft' : 'text-cinnabar-deep'}`}>{testMsg.text}</p>
