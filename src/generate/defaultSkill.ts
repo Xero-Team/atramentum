@@ -1,10 +1,22 @@
 /**
- * 默认风格 skill：仿「墨痕」课件风的通用写作规范，随应用内置，无需用户操作即可使用。
- * 用户仍可从自己的课件提炼 skill 覆盖之。
+ * The default style skill: a general writing guide in the Atramentum course
+ * style, built in so it works without the user doing anything.
+ * A skill distilled from their own course still overrides it.
+ *
+ * There are two of them, one per language, because a style guide is not
+ * something you can translate: the Chinese one is full of Chinese-specific
+ * advice (full-width punctuation, glossing English terms, Chinese code
+ * comments) that would be nonsense in an English course, and vice versa. The
+ * id is shared — only one is ever active, and it follows the interface
+ * language.
  */
 import type { WritingSkill } from '../store/skillStore'
+import type { Lang } from '../i18n/detect'
 
-const STYLE_GUIDE = `# 文风与语气
+/** Stable across locales: the selected skill is identified by this, not by name */
+export const DEFAULT_SKILL_ID = 'skill-builtin-default'
+
+const STYLE_GUIDE_ZH = `# 文风与语气
 - 讲给「聪明但没接触过这个领域的人」听：先给**生活类比**（如 编译=把信整体翻译、进程=菜谱与做菜的过程），再给**精确定义**，再回到技术细节。
 - 恒久追问「为什么这么设计」：给出设计动机与权衡，而不只陈述是什么；常用"先想一个问题 → 碰到麻烦 → 于是有了 X"的推进方式。
 - 术语首次出现时中英并注并加粗：**编译程序 (Compiler)**、**进程控制块 (PCB)**；此后可直接用中文。
@@ -36,7 +48,39 @@ const STYLE_GUIDE = `# 文风与语气
 - 不省略推导直接给结论；不给无法运行的伪代码当完整示例。
 - ASCII 图不用彩色/emoji，不用有语言标注的围栏画示意图。`
 
-const SAMPLE = `# 1.1 工具链:你需要装哪些东西、为什么
+const STYLE_GUIDE_EN = `# Voice and tone
+- Write for someone **smart who has never met this field**: start with an everyday analogy (compiling = translating a whole letter; a process = a recipe plus the cooking), then give the precise definition, then come back to the technical detail.
+- Keep asking **why it was designed this way**: give the motivation and the trade-off, not just what the thing is. A reliable move is "imagine a problem → hit the trouble it causes → and so X exists".
+- Bold a term the first time it appears, with a short gloss: **compiler**, **process control block (PCB)**. After that, use it plainly.
+- Organise by contrast wherever you can: option A vs option B, "static vs dynamic", "the same spectrum in three languages". Reach for a **table** when contrasting.
+- Address the reader as "you" and talk to them directly. Land a key turn with a short sentence: "that is what X really is."
+
+# Structural skeleton (every lesson follows it)
+1. Open with \`# N Title\` (e.g. \`# 6.1 What a process is\`).
+2. Follow it with one blockquote line: \`> Goal: ...\` — 2–3 key questions in bold, closing with "by the end you should be able to …".
+3. A \`---\` separator, then the body. Body sections use \`## N Title\` and may nest \`### x.y.z\` (numbering from 0, where \`0\` usually means "recall / background" and \`9\` is often left for exercises).
+4. 2–5 body sections, building up: analogy → definition → diagram → taking it apart → contrast / going further.
+5. Always end with a \`## Self-check\`: 3–8 numbered exercises that test the mental model ("why" / "what happens if") rather than recall. Marking a couple as required is optional but welcome.
+6. A final \`---\` and one line of footer navigation: \`Next → [title](file):one sentence\`. The teaser should carry a hook — name the puzzle the next lesson resolves.
+
+# Code and diagrams
+- Structural diagrams go in an **unlabelled \`\`\` fence**, drawn with box-drawing characters (┌ ─ ┐ │ └ ┘ ▼ → ├ ┤), with labels inside the boxes and arrows for flow or action. No wrapping that breaks the alignment, no ragged columns.
+- Code samples should run, stay short, and carry comments. Only real code gets a language tag (\`\`\`c / \`\`\`rust / \`\`\`bash).
+- Three or more parallel items (a comparison, a taxonomy, a set of parameters) become a Markdown table or a numbered list — never a wall of prose.
+- Put key magnitudes and rules in bold or inline code: \`2^10\`, \`O(log n)\`.
+
+# Language and formatting
+- Ordinary English punctuation. Keep a consistent voice throughout — no switching registers partway.
+- Keep paragraphs short (3–6 lines) and to one point. A conclusion worth remembering gets its own line and is set in bold.
+- Lessons should have real substance: 600–1500 words, enough to explain the thing properly rather than gesture at it.
+
+# Taboos
+- No filler ("in today's fast-moving world"), no pile of undefined jargon.
+- No first-person plural. No "this chapter will introduce…" recaps of the structure.
+- Never skip the reasoning and hand over a conclusion; never present non-running pseudo-code as a complete example.
+- ASCII diagrams are never coloured and never use emoji, and are never drawn inside a language-tagged fence.`
+
+const SAMPLE_ZH = `# 1.1 工具链:你需要装哪些东西、为什么
 
 > 本节目标:**装好 C / C++ / Rust 三套能跑代码的环境**,并理解每个工具是干什么的。
 > 不是简单的"按这步做"——我们要解释为什么要装这些、它们各自在第 0 章那张编译流水线图的哪个位置。
@@ -57,11 +101,51 @@ const SAMPLE = `# 1.1 工具链:你需要装哪些东西、为什么
 
 实际上你不会单独跑这些——会有一个**驱动程序(driver)**(比如 \`gcc\`、\`rustc\`)把它们编排起来,你只调一个命令,它在后台依次调子工具。`
 
-export const DEFAULT_SKILL: WritingSkill = {
-  id: 'skill-builtin-default',
-  name: '墨痕课件风（默认）',
-  styleGuide: STYLE_GUIDE,
-  sample: SAMPLE,
-  from: '墨痕默认风格',
-  createdAt: 0,
+const SAMPLE_EN = `# 1.1 The toolchain: what you need to install, and why
+
+> Goal: **get C, C++ and Rust to the point where each can compile and run something**, and understand what every tool in the chain is for.
+> This is not a "run these steps" list — we will explain why each piece is there and where it sits in the pipeline diagram from chapter 0.
+
+---
+
+## 1.1.0 First, recall: what does compiling actually need?
+
+Go back to the pipeline diagram in 3.1 of chapter 0:
+
+\`\`\`
+source ──[preprocessor]──[compiler]──[assembler]──[linker]── executable
+              ↑              ↑            ↑           ↑
+             cpp            cc1           as          ld
+\`\`\`
+
+To turn \`.c\` / \`.cpp\` / \`.rs\` into a program you can run, **you need every tool along that pipeline**. The "toolchain" is exactly that set of tools.
+
+You will not run them individually, of course. A **driver** (\`gcc\`, \`rustc\`) orchestrates them: you invoke one command, and it calls the sub-tools in order behind your back.`
+
+const SKILLS: Record<Lang, WritingSkill> = {
+  zh: {
+    id: DEFAULT_SKILL_ID,
+    name: '墨痕课件风（默认）',
+    styleGuide: STYLE_GUIDE_ZH,
+    sample: SAMPLE_ZH,
+    from: '墨痕默认风格',
+    createdAt: 0,
+  },
+  en: {
+    id: DEFAULT_SKILL_ID,
+    name: 'Atramentum course style (default)',
+    styleGuide: STYLE_GUIDE_EN,
+    sample: SAMPLE_EN,
+    from: 'Atramentum default style',
+    createdAt: 0,
+  },
+}
+
+/**
+ * The built-in skill for a language. The id is the same either way, so a
+ * selection made in one language survives a switch — only the guide's text
+ * changes.
+ */
+export function defaultSkill(lang: Lang): WritingSkill {
+  return SKILLS[lang]
 }

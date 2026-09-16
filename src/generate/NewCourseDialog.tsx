@@ -21,7 +21,7 @@ import { isAbortError } from '../ai/providers'
 import { useSettingsStore } from '../store/settingsStore'
 import { useSkillStore } from '../store/skillStore'
 import { distillSkill } from './skill'
-import { DEFAULT_SKILL } from './defaultSkill'
+import { DEFAULT_SKILL_ID, defaultSkill } from './defaultSkill'
 import { buildIndexMd, genLesson, genPlan, lessonFile, parseIndexEntries, planText, revisePlan } from './pipeline'
 import type { PlanLesson } from './pipeline'
 import { emitCourseCreated, emitCourseUpdated, useGenerateStore } from './generateStore'
@@ -60,7 +60,7 @@ async function loadReference(meta: CourseMeta): Promise<{ outline: string; sampl
 export function NewCourseDialog() {
   // Mounted globally: generation is a long job and the dialog lives outside the
   // router, so minimising keeps it alive instead of unmounting and cancelling.
-  const { t } = useI18n()
+  const { lang, t } = useI18n()
   const { visible, minimize, close } = useGenerateStore()
   const continueCourse = useGenerateStore((s) => s.continueCourse)
   const rewrite = useGenerateStore((s) => s.rewrite)
@@ -76,9 +76,12 @@ export function NewCourseDialog() {
   const [topic, setTopic] = useState('')
   const [requirements, setRequirements] = useState('')
 
-  // Style skill: the built-in "Atramentum course style" by default; '' = bare skeleton. Distil-panel state.
-  const [skillId, setSkillId] = useState(DEFAULT_SKILL.id)
-  const allSkills = useMemo(() => [DEFAULT_SKILL, ...skills], [skills])
+  // Style skill: the built-in one by default; '' = bare skeleton. Distil-panel state.
+  const [skillId, setSkillId] = useState(DEFAULT_SKILL_ID)
+  // The built-in skill follows the interface language (it keeps the same id, so
+  // a selection made in one language survives a switch)
+  const builtin = useMemo(() => defaultSkill(lang), [lang])
+  const allSkills = useMemo(() => [builtin, ...skills], [builtin, skills])
   const skill = allSkills.find((s) => s.id === skillId) ?? null
   const [distillOpen, setDistillOpen] = useState(false)
   const [distillRefId, setDistillRefId] = useState('')
@@ -727,7 +730,7 @@ export function NewCourseDialog() {
             <label className="mb-1 block text-sm font-semibold">{t.generate.styleSkill}</label>
             <div className="flex items-center gap-2">
               <select className={inputCls} value={skillId} onChange={(e) => setSkillId(e.target.value)}>
-                <option value={DEFAULT_SKILL.id}>{DEFAULT_SKILL.name}</option>
+                <option value={DEFAULT_SKILL_ID}>{builtin.name}</option>
                 {skills.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.name}
@@ -736,7 +739,7 @@ export function NewCourseDialog() {
                 ))}
                 <option value="">{t.generate.skillMinimal}</option>
               </select>
-              {skill && skill.id !== DEFAULT_SKILL.id && (
+              {skill && skill.id !== DEFAULT_SKILL_ID && (
                 <button
                   className="shrink-0 border border-ink/20 px-2.5 py-1.5 text-xs text-ink-faint transition hover:border-cinnabar hover:text-cinnabar"
                   onClick={() => {
@@ -868,7 +871,7 @@ export function NewCourseDialog() {
                   onChange={(e) => setSkillId(e.target.value)}
                   disabled={revising}
                 >
-                  <option value={DEFAULT_SKILL.id}>{DEFAULT_SKILL.name}</option>
+                  <option value={DEFAULT_SKILL_ID}>{builtin.name}</option>
                   {skills.map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.name}
