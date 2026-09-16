@@ -103,6 +103,14 @@ try {
   await send('Page.navigate', { url: APP })
 
   await waitFor(() => evaluate(`document.readyState === 'complete'`), { label: '首次加载完成' })
+  // Pin the UI language. The app detects it from the browser, and headless Chrome
+  // reports en-US — every assertion below is written against the Chinese copy.
+  // (An earlier revision of this script silently broke on that.)
+  await evaluate(
+    `localStorage.setItem('moxue-settings', JSON.stringify({ state: { lang: 'zh' }, version: 0 }))`,
+  )
+  await send('Page.reload')
+  await waitFor(() => evaluate(`document.readyState === 'complete'`), { label: '重新加载完成' })
   await waitFor(() => evaluate(`!!document.querySelector('h1')`), { label: 'React 渲染' })
   check('首次加载能渲染出书架', (await evaluate(`document.querySelector('h1').textContent`)) === '墨痕')
 
@@ -152,7 +160,7 @@ try {
     banner === 'yes' ? '' : '没等到事件——引导条会退化成说明文字')
 
   await evaluate(
-    `(() => { const b = [...document.querySelectorAll('button')].find(e => e.textContent.trim() === '设 置'); if (b) b.click(); return !!b })()`,
+    `(() => { const b = [...document.querySelectorAll('button')].find(e => e.textContent.trim() === '设置'); if (b) b.click(); return !!b })()`,
   )
   await sleep(500)
   check('设置里有「安装到桌面」常驻入口', await evaluate(`/安装到桌面/.test(document.body.innerText)`))
@@ -250,7 +258,7 @@ try {
   await waitFor(() => evaluate(`document.readyState === 'complete' && !!document.querySelector('h1')`), { label: '回书架' })
   await sleep(500)
 
-  const openSettings = `(() => { const b = [...document.querySelectorAll('button')].find(e => e.textContent.trim() === '设 置'); if (b) b.click(); return !!b })()`
+  const openSettings = `(() => { const b = [...document.querySelectorAll('button')].find(e => e.textContent.trim() === '设置'); if (b) b.click(); return !!b })()`
   const settingsOpen = `!![...document.querySelectorAll('h2')].find(e => e.textContent.trim() === '设置')`
 
   await evaluate(openSettings)
@@ -314,6 +322,24 @@ try {
   } else {
     check(`在目录里点课时（跳过：抽屉里只有 ${drawerItems} 项，测不出跳转）`, true)
   }
+
+  // ── 中英切换 ──
+  // 只验「切了之后界面真的变」：文案表本身由 typescript 保证对齐
+  // （en.ts 按 zh.ts 的类型检查，漏 key 直接编译不过）
+  await send('Page.navigate', { url: APP })
+  await waitFor(() => evaluate(`document.readyState === 'complete' && !!document.querySelector('h1')`), {
+    label: '回书架',
+  })
+  await sleep(400)
+  const zhTitle = await evaluate(`document.querySelector('h1').textContent`)
+  await evaluate(`(() => { const b = [...document.querySelectorAll('button')].find(e => e.textContent.trim() === '中文' || e.textContent.trim() === '设 置' || e.textContent.trim() === '设置'); if (b) b.click(); return !!b })()`)
+  await sleep(400)
+  await evaluate(`(() => { const b = [...document.querySelectorAll('button')].find(e => e.textContent.trim() === 'English'); if (b) b.click(); return !!b })()`)
+  await sleep(500)
+  const lang = await evaluate(`document.documentElement.lang`)
+  const enTitle = await evaluate(`document.querySelector('h1').textContent`)
+  check('切到 English 后界面文案与 <html lang> 都跟着变', lang === 'en' && enTitle === 'Atramentum',
+    `${zhTitle} → ${enTitle} / lang=${lang}`)
 } catch (e) {
   check(`执行出错：${e.message}`, false)
 } finally {
