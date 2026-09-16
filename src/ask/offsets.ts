@@ -1,13 +1,17 @@
 /**
- * 正文纯文本 ↔ DOM 位置映射：划词标注以「字符偏移」记录，渲染时换算回 Range。
+ * Plain text ↔ DOM position mapping: highlights are recorded as character
+ * offsets and converted back to a Range when rendering.
  *
- * 为什么用偏移而不是 DOM 路径或包 mark：AI 改写本节会整篇重渲染，DOM 路径必失效，
- * 而偏移只要文本没被大改就还指得准（失配时按原文回退搜索）。这样也不必拆 DOM 插一层
- * 包裹元素——链接改写、代码高亮、目录锚点全都不用动。
+ * Why offsets rather than a DOM path or wrapping the text in a mark: rewriting a
+ * lesson re-renders the whole thing, so any DOM path is guaranteed to break,
+ * while offsets still point at the right place as long as the text is broadly
+ * unchanged (falling back to a text search when they miss). It also avoids
+ * splitting the DOM to insert a wrapper element — link rewriting, code
+ * highlighting and heading anchors all stay untouched.
  */
 import type { AnnotationAnchor } from '../ask/types'
 
-/** 可参与标注的文本节点：跳过脚本/样式与面板 UI，只认真正的正文 */
+/** Text nodes eligible for highlighting: skip scripts/styles and panel UI, keep only the actual prose */
 function collectTextNodes(root: Node): Text[] {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode(node) {
@@ -22,14 +26,14 @@ function collectTextNodes(root: Node): Text[] {
   return out
 }
 
-/** 正文纯文本（与标注偏移同一坐标系） */
+/** The prose as plain text (same coordinate system as annotation offsets) */
 export function rootText(root: Node): string {
   return collectTextNodes(root)
     .map((n) => n.data)
     .join('')
 }
 
-/** 偏移 → DOM Range；越界返回 null（调用方按原文回退搜索） */
+/** Offsets → DOM Range; null when out of range (the caller falls back to a text search) */
 export function rangeFromOffsets(root: Node, start: number, end: number): Range | null {
   if (start < 0 || end <= start) return null
   const nodes = collectTextNodes(root)
@@ -54,7 +58,7 @@ export function rangeFromOffsets(root: Node, start: number, end: number): Range 
   return range
 }
 
-/** needle 在 text 里、start 偏移之前出现过几次 → 「第几次出现」（从 0 起） */
+/** How many times `needle` occurs in `text` before `start` → "which occurrence is this", from 0 */
 function occurrenceIndex(text: string, needle: string, start: number): number {
   if (!needle) return 0
   let nth = 0
@@ -66,7 +70,7 @@ function occurrenceIndex(text: string, needle: string, start: number): number {
   return nth
 }
 
-/** 纯文本里按原文找第 nth 次出现，返回区间；找不到返回 null */
+/** Find the nth occurrence of the text in the plain text and return its span; null when not found */
 function findByText(text: string, needle: string, nth = 0): { start: number; end: number } | null {
   if (!needle) return null
   let idx = text.indexOf(needle)
@@ -74,28 +78,30 @@ function findByText(text: string, needle: string, nth = 0): { start: number; end
     if (seen === nth) return { start: idx, end: idx + needle.length }
     idx = text.indexOf(needle, idx + 1)
   }
-  // 指定序号不存在（该处副本已被改写删掉）→ 退回第一次出现，好过整条标注丢失
+  // That occurrence is gone (a rewrite deleted it) → fall back to the first one; better than losing the whole highlight
   const first = text.indexOf(needle)
   return first >= 0 ? { start: first, end: first + needle.length } : null
 }
 
 /**
- * 把选区转成可持久化的锚点：记录偏移、原文与出现序号。
- * 须在 window.getSelection() 仍是该选区时调用。
+ * Turn a selection into a persistable anchor: offsets, the text itself and which
+ * occurrence it was.
+ * Must be called while window.getSelection() still holds that selection.
  */
 export function anchorFromSelection(root: Node, selection?: string): AnnotationAnchor | null {
   const sel = window.getSelection()
   if (!sel || sel.isCollapsed || sel.rangeCount === 0) return null
   const range = sel.getRangeAt(0)
   if (!root.contains(range.startContainer) || !root.contains(range.endContainer)) return null
-  // 容器内前缀长度 = 起点偏移；三个文本节点都要取到容器内的位置
+  // Prefix length inside the container = the start offset; both text nodes have to be located within the container
   const startPrefix = document.createRange()
   startPrefix.selectNodeContents(root)
   startPrefix.setEnd(range.startContainer, range.startOffset)
   const start = startPrefix.toString().length
   const text = (selection ?? sel.toString()).trim()
   if (!text) return null
-  // 结尾偏移不能靠 range.toString().length：换行/空白的归一化会错位，改为从整篇文本反查
+  // The end offset cannot come from range.toString().length — newline/whitespace
+  // normalisation would skew it — so look it up in the full text instead
   const full = rootText(root)
   const nth = occurrenceIndex(full, text, start)
   const found = findByText(full, text, nth)
@@ -104,21 +110,24 @@ export function anchorFromSelection(root: Node, selection?: string): AnnotationA
 
 export interface ResolvedAnchor {
   range: Range
-  /** 偏移是否失配、靠原文搜索兜底定位（提示用） */
+  /** Whether the offsets missed and the text search rescued it (for warnings) */
   fuzzy: boolean
 }
 
 /**
- * 收起当前选区。划词操作（问 / 标）拿到锚点后必须调它：
- * 浏览器选区是朱红底白字的不透明块，会一直盖在标注上——看着像「划词状态撤不掉」，
- * 也让高亮与下划线的差别整个看不出来（切了样式却像被锁死）。
+ * Collapse the current selection. Anything selection-driven (ask / mark) must
+ * call this once it has the anchor: the browser's own selection is an opaque
+ * block painted over the highlight, which reads as "the selection state is
+ * stuck" and completely hides the difference between highlight and underline
+ * (switching style looks like it did nothing).
  */
 export function clearSelection(): void {
   window.getSelection()?.removeAllRanges()
 }
 
-/** 锚点 → Range：先按偏移取，取到的文本与原文不符（正文已被改写）则按原文重新搜索，
- * 仍找不到返回 null（该标注在当前版本正文里已不存在）。
+/** Anchor → Range: take the offsets first; if the text found there no longer
+ *  matches (the body was rewritten), search for the text again; still nothing
+ *  means null (this highlight does not exist in the current version of the body).
  */
 export function resolveAnchor(root: Node, anchor: AnnotationAnchor): ResolvedAnchor | null {
   const full = rootText(root)

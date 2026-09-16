@@ -1,23 +1,25 @@
 /**
- * 标注重绘：把当前节的标注画进正文。
+ * Repainting highlights: draws the current lesson's annotations into the prose.
  *
- * 用 CSS Custom Highlight API（`CSS.highlights`）而非拆 DOM 插入 <mark>——
- * 正文节点树一个字节都不动，链接改写、代码高亮、heading 锚点、选区行为全部照旧。
- * 浏览器不支持时（老 Safari/Firefox）降级为只读：标注仍存着、仍可在列表里看，只是不上色。
+ * Uses the CSS Custom Highlight API (`CSS.highlights`) instead of splitting the
+ * DOM to insert <mark> — the prose's node tree is not touched at all, so link
+ * rewriting, code highlighting, heading anchors and selection behaviour all keep
+ * working. Where the browser lacks support (older Safari/Firefox) it degrades to
+ * read-only: the annotations are still stored and still listed, just not painted.
  */
 import type { Annotation } from './types'
 import { resolveAnchor } from './offsets'
 
 const HIGHLIGHT_KEYS = { highlight: 'moxue-highlight', underline: 'moxue-underline' } as const
 
-/** 当前已画上的 Range（清场与命中测试用） */
+/** The Ranges currently painted (for clearing and hit-testing) */
 let painted: { ann: Annotation; range: Range }[] = []
 
 export function highlightsSupported(): boolean {
   return typeof CSS !== 'undefined' && 'highlights' in CSS && typeof Highlight !== 'undefined'
 }
 
-/** 清掉已画的全部标注 */
+/** Clear every painted annotation */
 export function clearMarks(): void {
   painted = []
   if (!highlightsSupported()) return
@@ -25,8 +27,9 @@ export function clearMarks(): void {
 }
 
 /**
- * 画一批标注（传空数组即只清场）。
- * 返回实际画上的条数——少于传入数量说明有标注在当前正文里找不到位置。
+ * Paint a batch of annotations (passing an empty array just clears).
+ * Returns how many were actually painted — fewer than passed means some could
+ * not be located in the current body.
  */
 export function paintMarks(root: Node, annotations: Annotation[]): number {
   clearMarks()
@@ -48,7 +51,7 @@ export function paintMarks(root: Node, annotations: Annotation[]): number {
   return n
 }
 
-/** 命中的标注（点击正文时定位到具体那一条）；取落点最靠后（最内层）的一条 */
+/** The annotation under a point (so a click in the prose can pick out one specific mark); the innermost match wins */
 export function annotationAtPoint(x: number, y: number): Annotation | null {
   let hit: Annotation | null = null
   for (const { ann, range } of painted) {
@@ -63,7 +66,7 @@ export function annotationAtPoint(x: number, y: number): Annotation | null {
   return hit
 }
 
-/** 把某条已画的标注滚进视野（历史抽屉点「定位」时用）；返回是否找到 */
+/** Scroll a painted annotation into view (used by the history drawer's "Go" button); returns whether it was found */
 export function scrollToAnnotation(id: string): boolean {
   const hit = painted.find((p) => p.ann.id === id)
   if (!hit) return false

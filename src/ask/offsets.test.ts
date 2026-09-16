@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { anchorFromSelection, rangeFromOffsets, resolveAnchor, rootText } from './offsets'
 import type { AnnotationAnchor } from './types'
 
-/** 造一个挂到 body 的正文容器（offsets 依赖真实 DOM 结构） */
+/** Build a prose container attached to the body (offsets relies on real DOM structure) */
 function host(html: string): HTMLElement {
   const el = document.createElement('div')
   el.innerHTML = html
@@ -15,28 +15,28 @@ function anchor(start: number, end: number, text: string, nth = 0): AnnotationAn
 }
 
 describe('rootText', () => {
-  it('按文档顺序拼接全部文本节点，跳过脚本与样式', () => {
+  it('joins every text node in document order, skipping scripts and styles', () => {
     const el = host('<p>你好<b>世界</b></p><script>bad()</script><style>p{}</style><p>再见</p>')
     expect(rootText(el)).toBe('你好世界再见')
   })
 
-  it('空容器 → 空串', () => {
+  it('empty container → empty string', () => {
     expect(rootText(host('<p></p>'))).toBe('')
   })
 })
 
 describe('rangeFromOffsets', () => {
-  it('跨元素取到正确区间', () => {
+  it('spans elements and finds the right range', () => {
     const el = host('<p>abcdef</p><p>ghij</p>')
     expect(rangeFromOffsets(el, 4, 8)?.toString()).toBe('efgh')
   })
 
-  it('落在单个文本节点内', () => {
+  it('lands inside a single text node', () => {
     const el = host('<p>abcdef</p>')
     expect(rangeFromOffsets(el, 1, 3)?.toString()).toBe('bc')
   })
 
-  it('越界或空区间 → null', () => {
+  it('out of range or empty span → null', () => {
     const el = host('<p>abc</p>')
     expect(rangeFromOffsets(el, 0, 99)).toBeNull()
     expect(rangeFromOffsets(el, 2, 2)).toBeNull()
@@ -45,16 +45,16 @@ describe('rangeFromOffsets', () => {
 })
 
 describe('anchorFromSelection', () => {
-  /** 在容器里按纯文本偏移选中一段（模拟用户划词） */
+  /** Select a span by plain-text offset inside the container (simulates a user selection) */
   function selectByText(el: HTMLElement, text: string): void {
     const range = rangeFromOffsets(el, rootText(el).indexOf(text), rootText(el).indexOf(text) + text.length)
-    if (!range) throw new Error(`测试用例文本不存在：${text}`)
+    if (!range) throw new Error(`test fixture text not found: ${text}`)
     const sel = window.getSelection()
     sel?.removeAllRanges()
     sel?.addRange(range)
   }
 
-  it('划选一段文字 → 偏移与原文都记下来', () => {
+  it('selecting a passage records both the offsets and the text', () => {
     const el = host('<p>前文。进程控制块是 PCB。后文</p>')
     selectByText(el, '进程控制块')
     const a = anchorFromSelection(el, '进程控制块')
@@ -62,14 +62,14 @@ describe('anchorFromSelection', () => {
     expect(rangeFromOffsets(el, a!.start, a!.end)?.toString()).toBe('进程控制块')
   })
 
-  it('跨元素划选（段内加粗）也能落准', () => {
+  it('a selection spanning elements (bold inside a paragraph) still lands correctly', () => {
     const el = host('<p>开头<b>加粗部分</b>结尾</p>')
     selectByText(el, '加粗部分')
     const a = anchorFromSelection(el, '加粗部分')
     expect(rangeFromOffsets(el, a!.start, a!.end)?.toString()).toBe('加粗部分')
   })
 
-  it('同一段文字第二次被标注 → nth=1，重定位各归各位', () => {
+  it('the second highlight of the same text → nth=1, and each relocates to its own spot', () => {
     const el = host('<p>PCB 与 PCB</p>')
     const range = rangeFromOffsets(el, 6, 9)!
     const sel = window.getSelection()
@@ -80,13 +80,13 @@ describe('anchorFromSelection', () => {
     expect(a?.start).toBe(6)
   })
 
-  it('无选区 → null', () => {
+  it('no selection → null', () => {
     const el = host('<p>正文</p>')
     window.getSelection()?.removeAllRanges()
     expect(anchorFromSelection(el, '正文')).toBeNull()
   })
 
-  it('选区在容器之外 → null（面板内的划词不该变成正文标注）', () => {
+  it('selection outside the container → null (selecting inside a panel must not become a highlight)', () => {
     const el = host('<p>正文</p>')
     const outside = host('<p>面板里的字</p>')
     selectByText(outside, '面板里的字')
@@ -95,27 +95,27 @@ describe('anchorFromSelection', () => {
 })
 
 describe('resolveAnchor', () => {
-  it('偏移与原文都对得上 → 精确命中（fuzzy=false）', () => {
+  it('offsets and text both agree → exact hit (fuzzy=false)', () => {
     const el = host('<p>进程控制块是 PCB</p>')
     const hit = resolveAnchor(el, anchor(0, 5, '进程控制块'))
     expect(hit?.fuzzy).toBe(false)
     expect(hit?.range.toString()).toBe('进程控制块')
   })
 
-  it('正文被改写致偏移失配 → 按原文重新定位（fuzzy=true）', () => {
-    // 前面插入了一句，原偏移已经指偏
+  it('a rewrite knocks the offsets out → relocate by the text (fuzzy=true)', () => {
+    // A sentence was inserted before it, so the original offsets now point elsewhere
     const el = host('<p>新增的一句话。进程控制块是 PCB</p>')
     const hit = resolveAnchor(el, anchor(0, 5, '进程控制块'))
     expect(hit?.fuzzy).toBe(true)
     expect(hit?.range.toString()).toBe('进程控制块')
   })
 
-  it('原文已不在正文里 → null（该标注在当前版本无处可落）', () => {
+  it('text no longer in the body → null (this highlight has nowhere to go in the current version)', () => {
     const el = host('<p>整段都被换掉了</p>')
     expect(resolveAnchor(el, anchor(0, 5, '进程控制块'))).toBeNull()
   })
 
-  it('同一段文字出现多次：按 nth 各归各位', () => {
+  it('text appearing several times: nth decides which occurrence', () => {
     const el = host('<p>PCB 与 PCB</p>')
     const first = resolveAnchor(el, anchor(0, 3, 'PCB', 0))
     const second = resolveAnchor(el, anchor(8, 11, 'PCB', 1))
@@ -123,7 +123,7 @@ describe('resolveAnchor', () => {
     expect(second?.range.startOffset).toBe(6)
   })
 
-  it('指定的第 n 次出现被删掉 → 退回首处，不整条丢失', () => {
+  it('the nth occurrence was deleted → fall back to the first, rather than losing the whole highlight', () => {
     const el = host('<p>PCB</p>')
     const hit = resolveAnchor(el, anchor(6, 9, 'PCB', 1))
     expect(hit?.range.toString()).toBe('PCB')

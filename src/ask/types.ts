@@ -1,77 +1,78 @@
 /**
- * 划词标注与问答历史的共享类型。
- * 两者都以「课程 + 文件路径 + 偏移」定位正文，可随课件导出/导入（见 io/bundle.ts）。
+ * Shared types for highlights and Q&A history.
+ * Both locate their place in the prose as "course + file path + offset", so they
+ * travel with a course through export/import (see io/bundle.ts).
  */
 import type { FlowItem } from './agent'
 import type { ChatMessage } from '../ai/providers'
 
-/** 标注在正文中的定位：优先用字符偏移（AI 改写后仍能对上），失配时按原文回退搜索 */
+/** Where a highlight sits in the prose: character offsets first (they survive an AI rewrite), falling back to a text search */
 export interface AnnotationAnchor {
-  /** 选区起点 / 终点在容器纯文本中的字符偏移（半开区间） */
+  /** Character offsets of the selection's start / end within the container's plain text (half-open range) */
   start: number
   end: number
-  /** 划选原文（偏移失配时用于重新定位，也用于列表展示） */
+  /** The selected text (used to relocate when the offsets miss, and for list display) */
   text: string
-  /** 命中的是第几个（从 0 起）；-1 / 缺省 = 第一个 */
+  /** Which occurrence matched, from 0; -1 / absent = the first */
   nth?: number
 }
 
 export type NoteMarkStyle = 'highlight' | 'underline'
 
-/** 一条划词标注（高亮/下划线 + 用户笔记），随课件持久化 */
+/** One highlight (highlight/underline + the user's note), persisted with the course */
 export interface Annotation {
   id: string
   courseId: string
-  /** 课件内相对路径 */
+  /** Path relative to the course */
   path: string
-  /** 所在小节标题（展示用） */
+  /** Title of the lesson it sits in (for display) */
   sectionTitle: string
   anchor: AnnotationAnchor
   style: NoteMarkStyle
-  /** 用户笔记注释；空串表示只有标注没有笔记 */
+  /** The user's note; an empty string means a highlight with no note */
   note: string
-  /** 关联的问答（划词问 AI 时生成） */
+  /** The Q&A attached to it (created when you ask AI about the selection) */
   threadId?: string
   createdAt: number
   updatedAt: number
 }
 
-/** 问答会话里的一轮（与 AskPanel 的 Turn 同构，独立声明以便持久化） */
+/** One round in a Q&A conversation (same shape as AskPanel's Turn, declared separately so it can be persisted) */
 export interface ThreadTurn {
   role: 'user' | 'assistant'
   content: string
   kind?: 'ask' | 'edit'
-  /** agent 工作流时间线 */
+  /** Agent workflow timeline */
   flow?: FlowItem[]
 }
 
-/** 一次划词问答 / 一段自由问答会话；可被复现（不重发请求） */
+/** One selection Q&A or one free-form conversation; can be replayed (sending no request) */
 export interface AskThread {
   id: string
   courseId: string
-  /** 划词所在文件路径；自由问答时可为空 */
+  /** File the selection came from; may be empty for a free-form question */
   path: string
   sectionTitle: string
-  /** 划选原文；自由问答为空 */
+  /** The selected text; empty for a free-form question */
   selection: string
-  /** 选区上下文（前后文），复现时与划选一并回填 */
+  /** Selection context (surrounding text), restored along with the selection on replay */
   before: string
   after: string
-  /** 划词序号：同一次划选 = 同一个会话 id（实时写入时先占位后补答案） */
+  /** Selection sequence number: one selection = one conversation id (written as a placeholder first, filled in when the answer lands) */
   nonce: number
   label: string
   turns: ThreadTurn[]
-  /** agent 协议消息（供继续追问）；老数据可能缺失 */
+  /** Agent protocol messages (to continue the conversation); may be missing on old records */
   apiMessages?: ChatMessage[]
   createdAt: number
   updatedAt: number
 }
 
-/** 随课件导出的标注 + 问答包（moxue-notes.json） */
+/** The highlights + Q&A bundle exported alongside a course (moxue-notes.json) */
 export interface NotesBundle {
   format: 'moxue-notes'
   version: 1
-  /** 书名，导入时用于识别「同一本书」 */
+  /** Book title, used on import to recognise "the same book" */
   title: string
   formatOfCourse: string
   exportedAt: number
@@ -79,7 +80,7 @@ export interface NotesBundle {
   threads: StoredThreadExport[]
 }
 
-/** 导出时的标注：去掉 courseId（导入时重新绑定） */
+/** An annotation as exported: courseId dropped (rebound on import) */
 export type StoredAnnotationExport = Omit<Annotation, 'courseId'>
-/** 导出时的问答：去掉 courseId */
+/** A conversation as exported: courseId dropped */
 export type StoredThreadExport = Omit<AskThread, 'courseId'>

@@ -1,15 +1,17 @@
 /**
- * 划词探针：监听文档选区变化，当「正文容器内存在非空选区」时给出浮钮定位。
- * selectionchange 拖拽期间高频触发 → 200ms 防抖后再判定。
+ * Selection probe: watches the document selection and, whenever a non-empty
+ * selection sits inside the prose container, reports where to anchor the
+ * floating toolbar.
+ * `selectionchange` fires constantly while dragging → debounce 200ms, then check.
  */
 import { useEffect, useRef, useState } from 'react'
 import type { RefObject } from 'react'
 
 export interface SelectionProbe {
-  /** 浮钮定位：选区右下角（viewport 坐标） */
+  /** Where the toolbar goes: bottom-right corner of the selection (viewport coords) */
   x: number
   y: number
-  /** 选区上沿（viewport 坐标）：触屏上浮钮要翻到选区上方，得知道上面还有没有地方 */
+  /** Top edge of the selection (viewport coords) — on touch the toolbar flips above it, so it needs to know if there is room */
   top: number
   text: string
 }
@@ -32,7 +34,7 @@ export function useSelectionProbe(containerRef: RefObject<HTMLElement | null>, e
       }
       const text = sel.toString().trim()
       const anchor = sel.anchorNode
-      // 选区须起始于正文容器内（面板内划词不触发）
+      // The selection must start inside the prose container (selecting text in a panel does not trigger it)
       if (!text || !anchor || !container.contains(anchor)) {
         setProbe(null)
         return

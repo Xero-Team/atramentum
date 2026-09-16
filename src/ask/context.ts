@@ -1,16 +1,17 @@
 /**
- * 划词问答的上下文截取。
- * 给定选区所在 DOM 与选中文本，产出「选区 + 所在节标题 + 前后段落截取」的上下文包。
+ * Context extraction for selection Q&A.
+ * Given the DOM the selection lives in plus the selected text, produce a context
+ * bundle: "selection + its lesson title + surrounding paragraph excerpts".
  */
 
 export interface AskContext {
-  /** 用户划选的原文 */
+  /** The text the user selected */
   selection: string
-  /** 选区所在小节标题（最近的前辈 heading），可能为空 */
+  /** Title of the lesson the selection sits in (nearest ancestor heading); may be empty */
   sectionTitle: string
-  /** 选区前 ~400 字符的段落文本截取 */
+  /** Excerpt of the paragraph text before the selection (~400 characters) */
   before: string
-  /** 选区后 ~400 字符的段落文本截取 */
+  /** Excerpt of the paragraph text after the selection (~400 characters) */
   after: string
 }
 
@@ -20,7 +21,7 @@ function textContent(el: Element | null): string {
   return el?.textContent?.replace(/\s+/g, ' ').trim() ?? ''
 }
 
-/** 找选区所在容器的最近 heading 标题 */
+/** Find the nearest heading for the container the selection sits in */
 function nearestHeading(node: Node | null, root: HTMLElement): string {
   let cur: Node | null = node
   while (cur && cur !== root) {
@@ -29,7 +30,7 @@ function nearestHeading(node: Node | null, root: HTMLElement): string {
     }
     if (cur instanceof HTMLElement) {
       const prev = cur.previousElementSibling
-      // 向前找同级 heading
+      // Walk back through sibling headings
       let p: Element | null = prev
       while (p) {
         if (/^H[1-6]$/.test(p.tagName)) return textContent(p)
@@ -67,15 +68,16 @@ function blockTextAfter(root: HTMLElement, node: Node | null): string {
   return acc.slice(0, WINDOW).trim()
 }
 
-/** 从阅读视图容器里提取划词上下文；selection 为选区原文。
- *  range 可显式给（从已有标注进入时按锚点还原选区），缺省用当前窗口选区。 */
+/** Extract selection context from the reader container; `selection` is the selected text.
+ *  `range` may be passed explicitly (restoring a selection from an existing
+ *  highlight's anchor); otherwise the current window selection is used. */
 export function extractAskContext(root: HTMLElement, selection: string, range?: Range | null): AskContext {
   const sel = window.getSelection()
   const actual = range ?? (sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : null)
   let anchor: Node | null = null
   if (actual) {
     anchor = actual.startContainer
-    // 若容器外（比如面板内划词），退化为 root 起点
+    // Outside the container (selecting inside a panel, say): fall back to the root
     if (!root.contains(anchor)) anchor = null
   }
   return {

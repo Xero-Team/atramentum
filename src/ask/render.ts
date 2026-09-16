@@ -1,4 +1,5 @@
-// AI 回答渲染：净化后剥掉相对链接（回答里的站内链接无处可去，降级为纯文本样式）
+// Rendering an AI answer: strip relative links after sanitising (an in-site link
+// in an answer has nowhere to go, so it degrades to plain text styling)
 import { renderMarkdownSafe } from '../markdown/renderer'
 
 export function answerHTML(text: string): string {
