@@ -1,14 +1,15 @@
 name: Android APK
 
-# push main 自动出一版并发到 Release（下载地址固定，比翻 Actions 产物顺手）；
-# 也可以在 Actions 页面手动触发。
+# Pushing to main produces a build and publishes it to a Release (a fixed
+# download URL beats digging through Actions artefacts); it can also be run by
+# hand from the Actions page.
 on:
   push:
     branches: [main]
     tags: ['v*']
   workflow_dispatch:
 
-# 发 Release 需要写权限
+# Publishing a release needs write access
 permissions:
   contents: write
 
@@ -23,45 +24,51 @@ jobs:
           node-version: 22
           cache: npm
 
-      # AGP 8.13 要求 JDK 17 起，用 21
+      # AGP 8.13 needs JDK 17 or newer; 21 it is
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
 
-      # 必须显式给 packages：这 action 的默认值是 'tools platform-tools'，
-      # 而 tools 在现代 SDK 仓库里已经不存在了（被 cmdline-tools 取代），
-      # 默认值会让它直接报 "Failed to find package 'tools'" 并以退出码 1 结束
+      # packages must be given explicitly: this action defaults to
+      # 'tools platform-tools', and 'tools' no longer exists in the modern SDK
+      # repository (cmdline-tools replaced it). The default makes it fail with
+      # "Failed to find package 'tools'" and exit 1.
       - uses: android-actions/setup-android@v4
         with:
           packages: 'platform-tools'
 
-      # 许可必须先接受，否则 Gradle 拉不到缺的 SDK 组件
-      - name: 准备 Android SDK
+      # Licences have to be accepted first, or Gradle cannot fetch missing SDK components
+      - name: Prepare the Android SDK
         run: |
           yes | sdkmanager --licenses > /dev/null 2>&1 || true
           sdkmanager "platforms;android-36" "platform-tools"
-          # build-tools 的默认版本跟着 AGP 走，名字写错也不该让这一步挂掉——
-          # 许可已接受，Gradle 自己会补拉缺的组件
-          sdkmanager "build-tools;36.0.0" || echo "build-tools;36.0.0 未装，交给 Gradle 处理"
-          echo "--- 已装组件 ---"
+          # The default build-tools version follows AGP, and a wrong name should
+          # not fail this step — the licences are accepted, so Gradle will fetch
+          # anything missing itself
+          sdkmanager "build-tools;36.0.0" || echo "build-tools;36.0.0 not installed; leaving it to Gradle"
+          echo "--- installed packages ---"
           sdkmanager --list_installed | sed -n '1,25p'
 
-      # 签名密钥的缓存很关键：AGP 在缺少 debug.keystore 时会现生成一把，而 GitHub
-      # 的 runner 每次都是干净的——不缓存的话每次构建签名都不一样，用户就没法覆盖
-      # 安装（Android 拒绝签名不一致的更新，只能先卸载，本地数据一起没）。
+      # Caching the signing key matters: AGP generates a fresh debug.keystore when
+      # one is missing, and GitHub runners start clean every time. Without the
+      # cache every build is signed differently, and the user cannot install over
+      # the previous one (Android refuses an update whose signature differs, so
+      # they must uninstall first — losing all local data).
       #
-      # 路径按 AGP 8 实际落盘的位置（实测出来的，别照抄网上的 ~/.android/）：
-      # Android 的用户目录走了 XDG 约定，即 ~/.config/.android/。
-      # 万一以后又变，「检查签名与产物」那步会把 apksigner 的证书指纹打出来，
-      # 指纹在两次构建间对不上就说明这儿又失效了。
-      - name: 缓存 debug keystore（保证各次构建签名一致）
+      # The path is where AGP 8 actually writes it (measured, not copied from the
+      # ~/.android/ you find online): Android's user directory follows the XDG
+      # convention, i.e. ~/.config/.android/.
+      # If that changes again, the "check signature and artefacts" step prints
+      # apksigner's certificate fingerprint — if it differs between two builds,
+      # this has broken again.
+      - name: Cache the debug keystore (so every build signs identically)
         uses: actions/cache@v4
         with:
           path: ~/.config/.android/debug.keystore
           key: android-debug-keystore-v1
 
-      - name: 缓存 Gradle
+      - name: Cache Gradle
         uses: actions/cache@v4
         with:
           path: |
@@ -74,42 +81,45 @@ jobs:
 
       - run: npm run build
 
-      # android/ 不入库（见 .gitignore），每次现生成，保证原生工程与 package.json
-      # 里的 Capacitor 版本一致
-      - name: 生成原生工程并同步 Web 资源
+      # android/ is not committed (see .gitignore) and is generated every time, so
+      # the native project always matches the Capacitor version in package.json
+      - name: Generate the native project and sync the web assets
         run: |
           npx cap add android
           npx cap sync android
-          echo "--- 已发现的插件 ---"
+          echo "--- plugins found ---"
           npx cap ls android || true
 
-      # 图标与启动画面是本地光栅化好提交在 resources/android/res 下的：
-      # 构建机上没有 Chrome，不能现生成。见 scripts/make-icons.mjs
-      - name: 换上墨痕的图标与启动画面
+      # The icons and splash screens were rasterised locally and committed under
+      # resources/android/res: the build machine has no Chrome, so they cannot be
+      # generated here. See scripts/make-icons.mjs
+      - name: Swap in Atramentum's icons and splash screens
         run: |
           RES=android/app/src/main/res
-          # 模板自带的启动底是 Capacitor logo 的 PNG，与我们的 splash.xml 同名，
-          # 留着会报资源重复
+          # The template's splash background is a Capacitor logo PNG with the same
+          # name as our splash.xml, and leaving it in place reports a duplicate resource
           rm -f $RES/drawable*/splash.png
           cp -r resources/android/res/. $RES/
 
-          # Android 12+ 的启动画面走系统 SplashScreen API，背景色得从主题里给。
-          # 模板的 styles.xml 是生成物，只能打补丁；锚点找不到就报错退出，
-          # 免得 Capacitor 换模板之后这里静默失效
+          # Android 12+ draws the splash through the system SplashScreen API, so the
+          # background colour has to come from the theme. The template's styles.xml is
+          # generated, so it can only be patched; a missing anchor fails the build
+          # rather than letting this go quietly stale when Capacitor changes template
           STYLES=$RES/values/styles.xml
-          grep -q 'AppTheme.NoActionBarLaunch' "$STYLES" || { echo "::error::模板 styles.xml 结构变了，启动画面补丁需要更新"; exit 1; }
+          grep -q 'AppTheme.NoActionBarLaunch' "$STYLES" || { echo "::error::the template styles.xml has changed shape; the splash patch needs updating"; exit 1; }
           sed -i 's#<item name="android:background">@drawable/splash</item>#&\n        <item name="windowSplashScreenBackground">@color/moxue_splash_background</item>#' "$STYLES"
-          grep -q 'windowSplashScreenBackground' "$STYLES" || { echo "::error::启动画面补丁没打上"; exit 1; }
+          grep -q 'windowSplashScreenBackground' "$STYLES" || { echo "::error::the splash patch did not apply"; exit 1; }
 
-      - name: 构建 debug APK
+      - name: Build the debug APK
         working-directory: android
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon --stacktrace
 
-      # 打印签名证书指纹：换过密钥这里会变，而密钥一变用户就没法覆盖安装。
-      # 出安装问题时第一眼看这里。
-      - name: 检查签名与产物
+      # Print the signing certificate fingerprint: it changes if the key does, and a
+      # changed key means the user cannot install over the previous build. When an
+      # install fails, look here first.
+      - name: Check the signature and the artefacts
         working-directory: android
         run: |
           APK=app/build/outputs/apk/debug/app-debug.apk
@@ -118,13 +128,14 @@ jobs:
           "${BT}apksigner" verify --print-certs "$APK"
           "${BT}aapt2" dump badging "$APK" | grep -E "^package|^application-label:|^sdkVersion|^native-code" || true
 
-          # 指纹是签名一致性的唯一判据：连续两次构建对不上，就说明上面那个
-          # keystore 缓存又失效了（AGP 换落盘位置时会这样）。顺手把实际路径打出来。
-          echo "--- debug keystore 实际落点 ---"
+          # The fingerprint is the only proof the signing is consistent: if two builds
+          # in a row disagree, the keystore cache above has broken again (which is what
+          # happens when AGP moves where it writes the file). Print the real path too.
+          echo "--- where the debug keystore actually landed ---"
           find "$HOME" -maxdepth 5 -name '*.keystore' 2>/dev/null | head -5
 
-      # 稳定的文件名，Release 的下载地址才不会每次都变
-      - name: 准备发布产物
+      # A stable file name, so the Release download URL never changes
+      - name: Prepare the release artefact
         run: cp android/app/build/outputs/apk/debug/app-debug.apk moxue-android.apk
 
       - uses: actions/upload-artifact@v4
@@ -134,15 +145,32 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      # 每次构建更新同一个 Release（tag 固定为 android-latest），下载地址恒定：
+      # Every build updates the same Release (tag fixed at android-latest), so the
+      # download URL is constant:
       # https://github.com/Xero-Team/atramentum/releases/latest/download/moxue-android.apk
-      # 同名附件会被替换，不会越堆越多。
-      - name: 发布到 Release
+      # An attachment of the same name is replaced rather than piling up.
+      - name: Publish to the Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: android-latest
-          name: 墨痕 Android · 滚动构建
+          name: 墨痕 / Atramentum Android · rolling build
           body: |
+            Updated automatically on every `main` build — download and install.
+
+            This APK is signed with a **debug key**. Installing it yourself or
+            passing it to a friend is fine; publishing to Google Play needs a
+            release keystore of your own (put it in the repository secrets).
+
+            If installing over an existing copy fails ("App not installed"), the
+            signing key has usually changed. Uninstall the old one first — that
+            clears local data, so export anything important as a zip from inside
+            the app beforehand.
+
+            - Commit: `${{ github.sha }}`
+            - Build: `${{ github.run_number }}`
+
+            ---
+
             每次 `main` 构建自动更新到这里，直接下载安装即可。
 
             这是 **debug 签名**的包——自己装、发给朋友都没问题；上架 Google Play
@@ -150,8 +178,5 @@ jobs:
 
             覆盖安装失败（提示「应用未安装」）通常意味着签名变了，先卸载旧的再装
             （会清掉本地数据，重要内容记得先在应用内「导出 zip」）。
-
-            - 提交：`${{ github.sha }}`
-            - 构建序号：`${{ github.run_number }}`
           files: moxue-android.apk
           fail_on_unmatched_files: true
