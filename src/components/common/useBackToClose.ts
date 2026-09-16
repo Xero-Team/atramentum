@@ -1,20 +1,26 @@
 /**
- * 让「系统返回」先关掉应用内的浮层，而不是直接跳走。
+ * Make the system back gesture close the open overlay instead of leaving the page.
  *
- * 为什么需要：装到桌面后是独立窗口，没有浏览器返回按钮，Android 的返回手势
- * 是唯一的「退一步」入口。浮层原先不进 history，按返回会直接跳离当前页——
- * 在浏览器里还不算明显（有返回按钮兜底），装成应用之后就很别扭。
+ * Why this exists: an installed app is a standalone window with no browser back
+ * button, so on Android the back gesture is the only way to step back. Overlays
+ * used to push nothing onto the history, so back jumped straight out of the
+ * page — barely noticeable in a browser (there is a back button to fall back
+ * on), quite jarring once installed.
  *
- * 做法是经典的 history 陷阱：浮层打开时压一条带标记的历史，返回键先弹掉它；
- * 浮层被 ✕ / 遮罩关掉时，再把这条历史悄悄弹掉，免得留下一条「死历史」
- * （留着的话用户会觉得返回键时灵时不灵）。
+ * The classic history trap: opening an overlay pushes a marked history entry so
+ * back consumes it first; closing the overlay by any other means quietly pops
+ * that entry again, so no dead history is left behind (a leftover entry is what
+ * makes back feel like it sometimes does nothing).
  *
- * 两个容易写错的地方：
- * 1. 叠着的浮层。多个浮层各挂一个监听，一次返回会把它们全关掉。所以用栈记录，
- *    一次 popstate 只关最上面那层。
- * 2. 关浮层的同时发生路由跳转。比如在目录抽屉里点一节课：跳转和关抽屉在同一个
- *    事件里，跳转先把历史顶掉了，此时再 back() 会把刚做完的跳转撤销掉。
- *    所以关的时候要确认「当前这条历史还带着我的标记」，不是就别动。
+ * Two things that are easy to get wrong:
+ * 1. Stacked overlays. Each one registering its own popstate listener means a
+ *    single back closes all of them, so a stack is kept and one popstate closes
+ *    only the top.
+ * 2. Closing an overlay while the route changes. Tapping a lesson inside the
+ *    outline drawer navigates and closes the drawer in the same event; the
+ *    navigation has already replaced the history entry, and calling back() then
+ *    would undo the navigation the user just made. So closing checks whether the
+ *    current entry still carries our marker before touching the history.
  */
 import { useEffect, useRef } from 'react'
 
@@ -24,7 +30,7 @@ interface Entry {
 }
 
 const stack: Entry[] = []
-/** 由我们自己调 history.back() 引发的 popstate——这类不该拿去关浮层 */
+/** popstate events caused by our own history.back() — these must not close anything */
 let selfPops = 0
 let listening = false
 let seq = 0
@@ -37,7 +43,7 @@ function onPopState() {
   stack.pop()?.close()
 }
 
-/** 压一层「返回即关闭」，返回的是取消函数——直接当 useEffect 的 cleanup 用 */
+/** Push one "back closes this" layer. The returned function is the cleanup. */
 export function pushBackHandler(close: () => void): () => void {
   if (!listening) {
     listening = true
@@ -47,21 +53,27 @@ export function pushBackHandler(close: () => void): () => void {
   const id = ++seq
   const entry: Entry = { id, close }
   stack.push(entry)
-  // 展开原有 state：React Router 在 history.state 里存了 key / idx，
-  // 整个覆盖掉会让它的前进后退判定失准
+  // Spread the existing state: React Router keeps key / idx in history.state,
+  // and replacing it wholesale throws off its forward/back detection.
   window.history.pushState({ ...window.history.state, moxueOverlay: id }, '')
 
   return () => {
     const i = stack.findIndex((e) => e.id === id)
-    if (i < 0) return // 已经是返回键关掉的，那条历史被浏览器消费掉了
+    if (i < 0) return // already closed by the back gesture; the browser consumed that entry
     stack.splice(i, 1)
+    // Is the current history entry still ours? If closing happened alongside a
+    // navigation, the router already replaced it and back() would undo that.
     if ((window.history.state as { moxueOverlay?: number } | null)?.moxueOverlay !== id) return
     selfPops++
     window.history.back()
   }
 }
 
-/** 把浮层的开关绑到系统返回上。onClose 走 ref，避免它每次渲染换新函数时重复压历史 */
+/**
+ * Bind an overlay's open state to the system back gesture.
+ * `onClose` goes through a ref so a fresh function each render does not push
+ * another history entry.
+ */
 export function useBackToClose(open: boolean, onClose: () => void): void {
   const closeRef = useRef(onClose)
   closeRef.current = onClose

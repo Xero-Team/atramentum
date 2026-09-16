@@ -1,17 +1,21 @@
-// 模态遮罩：Esc / 点击遮罩关闭，内容区阻止冒泡
+// Modal backdrop: Esc or a click on the backdrop closes it; the panel swallows
+// clicks so they do not reach the backdrop.
 import { useEffect } from 'react'
 import type { ReactNode } from 'react'
 import { useBackToClose } from './useBackToClose'
 
 /**
- * 共享弹窗外壳。
+ * Shared dialog shell.
  *
- * 移动端要点（踩过坑，别改回去）：
- * - 外层自己 `overflow-y-auto` + 内层 `flex min-h-full items-center`：这样内容比视口高时
- *   整卡从顶部开始排、可以滚动。老写法 `items-center` + 面板 `overflow-hidden` 会把
- *   超出部分顶到 y<0 且无处可滚，底部的「确定 / 生成」按钮直接够不着。
- * - `max-h-[85dvh]` 而非 `85vh`：移动浏览器地址栏收起/展开时 vh 不变，100vh 的盒子
- *   会被浏览器工具栏盖住一截。面板自己也给 `overflow-y-auto` 兜底。
+ * Mobile details that were learned the hard way — do not "simplify" them back:
+ * - The outer element scrolls (`overflow-y-auto`) while the inner one is
+ *   `flex min-h-full items-center`. That way an over-tall panel starts at the
+ *   top and scrolls. The older `items-center` + `overflow-hidden` pair pushed
+ *   the overflow to y<0 where nothing could reach it, putting the bottom
+ *   "confirm / generate" buttons out of reach entirely.
+ * - `max-h-[85dvh]`, not `85vh`: mobile browser chrome does not change vh, so a
+ *   100vh box sits partly behind the toolbar. The panel also scrolls on its own
+ *   as a fallback.
  */
 export function Overlay({
   children,
@@ -30,8 +34,8 @@ export function Overlay({
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  // 系统返回键（独立窗口里 Android 的返回手势是唯一的退路）先关对话框。
-  // 挂在 Overlay 上，设置 / 导入 / AI 著书三个对话框就都自动有了。
+  // System back (the only way "back" exists in an installed app) closes the
+  // dialog. Hanging it here gives Settings, Import and the AI writer all three.
   useBackToClose(true, onClose)
 
   return (
@@ -39,7 +43,8 @@ export function Overlay({
       className="fixed inset-0 z-50 overflow-y-auto overscroll-contain bg-scrim/45 backdrop-blur-sm"
       onClick={closeOnOverlay ? onClose : undefined}
     >
-      {/* 每条外边距都写成 max(留白, 安全区)：sm:p-4 会盖掉不带变体的 pb-，安全区就没了 */}
+      {/* Every margin is max(padding, safe-area): a bare `sm:p-4` would override
+          the un-prefixed pb-* and silently drop the inset. */}
       <div className="flex min-h-full items-center justify-center p-3 pt-[max(0.75rem,env(safe-area-inset-top))] pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:p-4 sm:pt-[max(1rem,env(safe-area-inset-top))] sm:pb-[max(1rem,env(safe-area-inset-bottom))]">
         <div
           className="max-h-[85dvh] w-[560px] max-w-full overflow-y-auto border border-ink/20 bg-paper shadow-paper"

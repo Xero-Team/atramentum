@@ -1,10 +1,13 @@
-// 外观快捷开关：一键在深色 / 浅色之间切换（「浅色 / 深色 / 跟随系统」三选一在设置对话框里）
+// Quick appearance toggle: flips between dark and light.
+// The three-way choice (light / dark / follow system) lives in Settings.
+import { useI18n } from '../i18n'
 import { useThemeToggle } from '../store/theme'
 
 export function ThemeToggle({ className = '' }: { className?: string }) {
+  const { t } = useI18n()
   const { resolved, toggle } = useThemeToggle()
   const dark = resolved === 'dark'
-  const label = dark ? '切换到浅色' : '切换到深色'
+  const label = dark ? t.theme.toLight : t.theme.toDark
 
   return (
     <button

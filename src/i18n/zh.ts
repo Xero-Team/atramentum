@@ -109,6 +109,55 @@ export const zh = {
     newCategory: '＋ 新建分类',
     footer: '墨痕 · 纯静态部署于 Cloudflare Pages · AI 密钥仅存本机',
   },
+
+  theme: {
+    toLight: '切换到浅色',
+    toDark: '切换到深色',
+  },
+
+  generate: {
+    badgeRunning: '著书中',
+    badgeTitle: 'AI 著书正在后台进行，点击查看进度',
+  },
+
+  reader: {
+    backToShelf: '← 墨痕书架',
+    tocTitle: '课时目录',
+    tocExpand: '展开',
+    tocCollapse: '收起',
+    breadcrumbShelf: '书架',
+    askAi: '问 AI',
+    historyTitle: '本书的划词标注与问答历史（从左侧滑出）',
+    prevLesson: '← 上一篇',
+    nextLesson: '下一篇 →',
+    moreActions: '更多操作',
+
+    menuContinue: '续写缺失课时',
+    menuContinueTitle: '沿课时规划继续生成缺失的课时',
+    menuRewriting: '正在备副本…',
+    menuRewrite: '整书改写',
+    menuRewriteTitle: '按你的要求整体重写全书各课时（内置课件会先另存为可编辑副本）',
+
+    loading: '展卷中……',
+    fetching: '取文中……',
+    missing: '课件不存在或已被移除。',
+    backToShelfLink: '回到书架',
+    loadError: '课件加载失败，请检查网络后刷新重试。',
+    lessonPending: '该课时尚未写出……AI 正在后台撰写，完成后自动显示',
+
+    exportedSkipped: (n: number) => `${n} 个文件缺失被跳过`,
+    exportedNotes: (n: number) => `含 ${n} 条标注`,
+    exportFailed: (msg: string) => `导出失败：${msg}`,
+    rewriteApplied: '已应用改写',
+    courseNotLoaded: '课件尚未加载',
+    markSpanTooWide: '这段文字跨了多个区块，暂时无法标注——缩短选区再试',
+    markFailed: (msg: string) => `标注失败：${msg}`,
+    undoFailed: (msg: string) => `撤销失败：${msg}`,
+    rewriteInitFailed: (msg: string) => `整书改写初始化失败：${msg}`,
+
+    markedToast: (text: string) => `已标注「${text}」`,
+    undo: '撤销',
+  },
 }
 
 /** Shape every locale must satisfy. `en.ts` is checked against it. */

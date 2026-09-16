@@ -7,6 +7,7 @@ import DOMPurify from 'dompurify'
 import { mountMarkdown, renderMarkdown } from '../markdown/renderer'
 import { aiEnabled, type CourseMeta, type CourseTree, type LessonNode } from '../types/course'
 import { useSelectionProbe } from '../ask/SelectionWatcher'
+import { useI18n } from '../i18n'
 import { FloatingToolbar } from '../ask/FloatingToolbar'
 import { AskPanel } from '../ask/AskPanel'
 import type { AskSeed } from '../ask/AskPanel'
@@ -56,13 +57,14 @@ function TocItem({
   const hasChildren = !!node.children?.length
   const isOpen = expanded.has(node.path)
   const active = currentPath === node.path
+  const { t } = useI18n()
 
   return (
     <div>
       <div className="flex items-center">
         {hasChildren ? (
           <button
-            aria-label={isOpen ? '收起' : '展开'}
+            aria-label={isOpen ? t.reader.tocCollapse : t.reader.tocExpand}
             className="w-7 shrink-0 py-1 text-center text-ink-faint hover:text-cinnabar md:w-5 md:py-0"
             onClick={() => toggle(node.path)}
           >
@@ -150,6 +152,7 @@ export default function Reader() {
   const pendingFocusRef = useRef<string | null>(null)
   const { probe, clearProbe } = useSelectionProbe(mountRef, askAvailable)
   const { resolved: resolvedTheme, toggle: toggleTheme } = useThemeToggle()
+  const { t } = useI18n()
   const reloadNotes = useCallback(() => setNotesNonce((n) => n + 1), [])
 
   // 撤销提示自动消失
@@ -191,15 +194,18 @@ export default function Reader() {
     setExportMsg('')
     try {
       const r = await exportCourseZip(meta)
-      const parts = [r.missing > 0 ? `${r.missing} 个文件缺失被跳过` : '', r.notes > 0 ? `含 ${r.notes} 条标注` : '']
+      const parts = [
+        r.missing > 0 ? t.reader.exportedSkipped(r.missing) : '',
+        r.notes > 0 ? t.reader.exportedNotes(r.notes) : '',
+      ]
       setExportMsg(parts.filter(Boolean).join(' · '))
       setTimeout(() => setExportMsg(''), 4000)
     } catch (e) {
-      setExportMsg(`导出失败：${(e as Error).message}`)
+      setExportMsg(t.reader.exportFailed((e as Error).message))
     } finally {
       setExporting(false)
     }
-  }, [meta, exporting])
+  }, [meta, exporting, t])
 
   /** 划词 → 起一轮带上下文的问答（nonce 用时间戳，做题号也当会话 id 用） */
   const handleAsk = useCallback(() => {
@@ -223,7 +229,7 @@ export default function Reader() {
     // 锚点已拿到，立刻收起选区：留着的话朱红选区会盖住标注，看着像撤不掉的状态
     clearSelection()
     if (!anchor) {
-      setExportMsg('这段文字跨了多个区块，暂时无法标注——缩短选区再试')
+      setExportMsg(t.reader.markSpanTooWide)
       setTimeout(() => setExportMsg(''), 4000)
       return
     }
@@ -245,10 +251,10 @@ export default function Reader() {
       setCard({ ann, thread: null, x: spot.x, y: spot.y })
       setUndoMark({ id: ann.id, text: ann.anchor.text })
     } catch (e) {
-      setExportMsg(`标注失败：${(e as Error).message}`)
+      setExportMsg(t.reader.markFailed((e as Error).message))
       setTimeout(() => setExportMsg(''), 4000)
     }
-  }, [probe, clearProbe, meta, currentPath, getProseRoot, reloadNotes])
+  }, [probe, clearProbe, meta, currentPath, getProseRoot, reloadNotes, t])
 
   /** 撤销刚标下的那一条（误触可回退） */
   const undoLastMark = useCallback(async () => {
@@ -260,10 +266,10 @@ export default function Reader() {
       await deleteAnnotation(target.id)
       reloadNotes()
     } catch (e) {
-      setExportMsg(`撤销失败：${(e as Error).message}`)
+      setExportMsg(t.reader.undoFailed((e as Error).message))
       setTimeout(() => setExportMsg(''), 4000)
     }
-  }, [undoMark, reloadNotes])
+  }, [undoMark, reloadNotes, t])
 
   /** 点正文里的高亮/下划线 → 开标注卡（带出关联的问答） */
   const openCard = useCallback(async (ann: Annotation, x: number, y: number) => {
@@ -308,17 +314,17 @@ export default function Reader() {
         openGenerate({ continueCourse: meta, rewrite: true })
       }
     } catch (e) {
-      setExportMsg(`整书改写初始化失败：${(e as Error).message}`)
+      setExportMsg(t.reader.rewriteInitFailed((e as Error).message))
       setTimeout(() => setExportMsg(''), 4000)
     } finally {
       setForking(false)
     }
-  }, [meta, forking, openGenerate])
+  }, [meta, forking, openGenerate, t])
 
   /** AI 改写应用：builtin 先 fork 成副本并跳转；本地课件直接写回并刷新正文 */
   const handleApplyEdit = useCallback(
     async (text: string): Promise<string | null> => {
-      if (!meta || !currentPath) return '课件尚未加载'
+      if (!meta || !currentPath) return t.reader.courseNotLoaded
       try {
         let target = meta
         if (meta.source === 'builtin') {
@@ -333,14 +339,14 @@ export default function Reader() {
         await applyCourseEdit(target, currentPath, text)
         const fresh = await storeFor(target.source).readFile(courseId, currentPath)
         setContent(fresh ?? text)
-        setExportMsg('已应用改写')
+        setExportMsg(t.reader.rewriteApplied)
         setTimeout(() => setExportMsg(''), 3000)
         return null
       } catch (e) {
         return (e as Error).message
       }
     },
-    [meta, courseId, currentPath, navigate],
+    [meta, courseId, currentPath, navigate, t],
   )
 
   // 载入课件元信息与目录树
@@ -370,7 +376,7 @@ export default function Reader() {
       })
       .catch((e) => {
         if (alive) {
-          console.error('[moxue] 载入课件失败', e)
+          console.error('[moxue] failed to load the course', e)
           setPhase('error')
         }
       })
@@ -420,7 +426,7 @@ export default function Reader() {
       .readFile(courseId, currentPath)
       .then((text) => {
         if (!alive) return
-        if (text === null) setContentErr('该课时尚未写出……AI 正在后台撰写，完成后自动显示')
+        if (text === null) setContentErr(t.reader.lessonPending)
         else setContent(text)
       })
       .catch((e) => alive && setContentErr((e as Error).message))
@@ -486,7 +492,7 @@ export default function Reader() {
           filePath: currentPath,
           onLink: (coursePath) => {
             // 越出课程根 / 不可解析链接：renderer 已加 link-blocked 并拦截点击，这里仅提示
-            if (!coursePath) console.info('[moxue] 链接越出课程根或不可解析，已拦截')
+            if (!coursePath) console.info('[moxue] link points outside the course or cannot be resolved — blocked')
           },
         }),
       )
@@ -505,7 +511,7 @@ export default function Reader() {
       .then((list) => {
         if (alive) setAnnotations(list)
       })
-      .catch((e) => console.warn('[moxue] 读取标注失败', e))
+      .catch((e) => console.warn('[moxue] failed to read highlights', e))
     return () => {
       alive = false
     }
@@ -517,7 +523,7 @@ export default function Reader() {
     if (!(root instanceof HTMLElement) || content === null) return
     if (annotations.length > 0 && !highlightsSupported()) {
       // 老浏览器（无 CSS Custom Highlight API）降级：标注仍存着，历史里可看可编辑，只是不上色
-      console.info('[moxue] 当前浏览器不支持 CSS Custom Highlight API，划词标注不上色')
+      console.info('[moxue] this browser lacks the CSS Custom Highlight API; highlights will not be painted')
     }
     paintMarks(root, annotations)
     const focus = pendingFocusRef.current
@@ -586,11 +592,11 @@ export default function Reader() {
   const tocHead = (
     <div className="border-b border-ink/10 px-5 pb-4 pt-5">
       <Link to="/" className="text-xs tracking-[0.25em] text-ink-faint transition hover:text-cinnabar">
-        ← 墨痕书架
+        {t.reader.backToShelf}
       </Link>
       <div className="mt-3 flex items-center gap-3">
         <span className="h-8 w-8 shrink-0 bg-cinnabar text-center font-song text-sm font-bold leading-8 text-paper shadow-seal">
-          {meta?.seal || '课'}
+          {meta?.seal || t.shelf.sealCourse}
         </span>
         <h1 className="min-w-0 truncate font-song text-base font-bold tracking-wide" title={meta?.title}>
           {meta?.title ?? courseId}
@@ -628,16 +634,16 @@ export default function Reader() {
     if (meta.source === 'generated') {
       menuItems.push({
         key: 'continue',
-        label: '续写缺失课时',
-        title: '沿课时规划继续生成缺失的课时',
+        label: t.reader.menuContinue,
+        title: t.reader.menuContinueTitle,
         onClick: () => openGenerate({ continueCourse: meta }),
       })
     }
     if (aiEnabled(meta)) {
       menuItems.push({
         key: 'rewrite',
-        label: forking ? '正在备副本…' : '整书改写',
-        title: '按你的要求整体重写全书各课时（内置课件会先另存为可编辑副本）',
+        label: forking ? t.reader.menuRewriting : t.reader.menuRewrite,
+        title: t.reader.menuRewriteTitle,
         disabled: forking,
         onClick: () => void handleRewrite(),
       })
@@ -645,12 +651,12 @@ export default function Reader() {
   }
   menuItems.push({
     key: 'export',
-    label: exporting ? '导出中…' : '导出 zip',
+    label: exporting ? t.common.exporting : t.common.exportZip,
     disabled: exporting || !meta,
     onClick: () => void handleExport(),
   })
-  menuItems.push({ key: 'settings', label: '设置', onClick: () => setShowSettings(true) })
-  menuItems.push({ key: 'theme', label: `切换到${resolvedTheme === 'dark' ? '浅色' : '深色'}`, cls: 'md:hidden', onClick: toggleTheme })
+  menuItems.push({ key: 'settings', label: t.common.settings, onClick: () => setShowSettings(true) })
+  menuItems.push({ key: 'theme', label: resolvedTheme === 'dark' ? t.theme.toLight : t.theme.toDark, cls: 'md:hidden', onClick: toggleTheme })
   menuItems.push({ key: 'divider', divider: true, label: '' })
   if (prev)
     menuItems.push({ key: 'prev', label: `← ${prev.title}`, title: prev.title, cls: 'md:hidden', onClick: () => goTo(prev.path) })
@@ -671,15 +677,15 @@ export default function Reader() {
           <button
             className="flex h-9 w-9 shrink-0 items-center justify-center border border-ink/15 text-ink-soft transition hover:border-cinnabar/50 hover:text-cinnabar-deep md:hidden"
             onClick={() => setTocOpen(true)}
-            aria-label="课时目录"
-            title="课时目录"
+            aria-label={t.reader.tocTitle}
+            title={t.reader.tocTitle}
           >
             ☰
           </button>
 
           <div className="min-w-0 flex-1 truncate text-xs text-ink-faint">
             <Link to="/" className="md:hidden transition hover:text-cinnabar">
-              书架
+              {t.reader.breadcrumbShelf}
             </Link>
             <span className="md:hidden"> / </span>
             {meta?.title}
@@ -702,26 +708,26 @@ export default function Reader() {
                 }`}
                 onClick={() => setAskOpen((v) => !v)}
               >
-                问 AI
+                {t.reader.askAi}
               </button>
             )}
             <button
               className={hdrBtn}
               onClick={() => setHistoryOpen(true)}
-              title="本书的划词标注与问答历史（从左侧滑出）"
+              title={t.reader.historyTitle}
             >
-              历史
+              {t.common.history}
             </button>
             {/* md 以上空间够，把上下篇和主题开关也摆出来 */}
             <ThemeToggle className="hidden md:flex" />
             {prev && (
               <button className={`${hdrBtn} hidden md:block`} onClick={() => goTo(prev.path)} title={prev.title}>
-                ← 上一篇
+                {t.reader.prevLesson}
               </button>
             )}
             {next && (
               <button className={`${hdrBtn} hidden md:block`} onClick={() => goTo(next.path)} title={next.title}>
-                下一篇 →
+                {t.reader.nextLesson}
               </button>
             )}
 
@@ -729,9 +735,9 @@ export default function Reader() {
               <button
                 className="flex h-9 w-9 items-center justify-center border border-ink/15 text-base leading-none text-ink-soft transition hover:border-cinnabar/50 hover:text-cinnabar-deep md:h-7 md:w-7 md:text-sm"
                 onClick={() => setMenuOpen((v) => !v)}
-                aria-label="更多操作"
+                aria-label={t.reader.moreActions}
                 aria-expanded={menuOpen}
-                title="更多操作"
+                title={t.reader.moreActions}
               >
                 ⋯
               </button>
@@ -769,22 +775,25 @@ export default function Reader() {
 
         <div ref={scrollRef} className="flex-1 overflow-y-auto overscroll-contain" onClick={onBodyClick}>
           <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6 sm:py-10">
-            {phase === 'loading' && <p className="text-sm text-ink-faint">展卷中……</p>}
+            {phase === 'loading' && <p className="text-sm text-ink-faint">{t.reader.loading}</p>}
             {phase === 'missing' && (
               <div className="border border-ink/15 bg-paper-deep/40 p-6 text-sm text-ink-soft">
-                课件不存在或已被移除。<Link to="/" className="text-cinnabar underline underline-offset-4">回到书架</Link>
+                {t.reader.missing}{' '}
+                <Link to="/" className="text-cinnabar underline underline-offset-4">
+                  {t.reader.backToShelfLink}
+                </Link>
               </div>
             )}
             {phase === 'error' && (
               <div className="border border-cinnabar/40 bg-cinnabar/5 p-6 text-sm text-cinnabar-deep">
-                课件加载失败，请检查网络后刷新重试。
+                {t.reader.loadError}
               </div>
             )}
             {phase === 'ready' && contentErr && (
               <div className="border border-cinnabar/40 bg-cinnabar/5 p-6 text-sm text-cinnabar-deep">{contentErr}</div>
             )}
             {phase === 'ready' && !contentErr && content === null && (
-              <p className="text-sm text-ink-faint">取文中……</p>
+              <p className="text-sm text-ink-faint">{t.reader.fetching}</p>
             )}
             {/* 渲染产物挂载点（.prose 根由 mountMarkdown 生成） */}
             <div ref={mountRef} />
@@ -830,7 +839,7 @@ export default function Reader() {
       )}
 
       {/* 窄屏的课时目录：与左栏同一份内容，从左侧滑出 */}
-      <Drawer open={tocOpen} onClose={() => setTocOpen(false)} label="课时目录" width="min(86vw,320px)">
+      <Drawer open={tocOpen} onClose={() => setTocOpen(false)} label={t.reader.tocTitle} width="min(86vw,320px)">
         {tocHead}
         {tocNav}
       </Drawer>
@@ -849,18 +858,18 @@ export default function Reader() {
       {undoMark && (
         <div className="fixed bottom-[max(1.25rem,env(safe-area-inset-bottom))] left-1/2 z-50 flex max-w-[calc(100vw-1.5rem)] -translate-x-1/2 items-center gap-3 border border-ink/20 bg-paper px-3.5 py-2 text-xs text-ink-soft shadow-paper">
           <span className="min-w-0 max-w-56 truncate">
-            已标注「<span className="font-song text-ink">{undoMark.text}</span>」
+            {t.reader.markedToast(undoMark.text)}
           </span>
           <button
             className="-my-1 shrink-0 border border-ink/20 px-2.5 py-1.5 text-ink-soft transition hover:border-cinnabar/60 hover:text-cinnabar-deep md:my-0 md:py-0.5"
             onClick={() => void undoLastMark()}
           >
-            撤销
+            {t.reader.undo}
           </button>
           <button
             className="-my-1 -mr-1 shrink-0 p-1.5 text-ink-faint transition hover:text-cinnabar md:my-0 md:mr-0"
             onClick={() => setUndoMark(null)}
-            aria-label="关闭提示"
+            aria-label={t.shelf.dismissNotice}
           >
             ✕
           </button>

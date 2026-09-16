@@ -113,4 +113,54 @@ export const en: Dict = {
     newCategory: '＋ New category',
     footer: 'Atramentum · static, hosted on Cloudflare Pages · your AI key never leaves this device',
   },
+
+  theme: {
+    toLight: 'Switch to light',
+    toDark: 'Switch to dark',
+  },
+
+  generate: {
+    badgeRunning: 'Writing',
+    badgeTitle: 'AI is writing in the background — tap to see progress',
+  },
+
+  reader: {
+    backToShelf: '← Atramentum shelf',
+    tocTitle: 'Lessons',
+    tocExpand: 'Expand',
+    tocCollapse: 'Collapse',
+    breadcrumbShelf: 'Shelf',
+    askAi: 'Ask AI',
+    historyTitle: 'Highlights and Q&A for this book (slides in from the left)',
+    prevLesson: '← Previous',
+    nextLesson: 'Next →',
+    moreActions: 'More actions',
+
+    menuContinue: 'Finish missing lessons',
+    menuContinueTitle: 'Keep generating the lessons still missing from the plan',
+    menuRewriting: 'Copying…',
+    menuRewrite: 'Rewrite whole book',
+    menuRewriteTitle:
+      'Rewrite every lesson against your requirements (built-in courses are saved as an editable copy first)',
+
+    loading: 'Opening…',
+    fetching: 'Fetching text…',
+    missing: 'This course does not exist or has been removed.',
+    backToShelfLink: 'Back to the shelf',
+    loadError: 'Could not load this course. Check your connection and reload.',
+    lessonPending: 'This lesson is not written yet — AI is still working on it, it will appear on its own.',
+
+    exportedSkipped: (n: number) => `${n} missing file${n === 1 ? '' : 's'} skipped`,
+    exportedNotes: (n: number) => `includes ${n} highlight${n === 1 ? '' : 's'}`,
+    exportFailed: (msg: string) => `Export failed: ${msg}`,
+    rewriteApplied: 'Rewrite applied',
+    courseNotLoaded: 'Course not loaded yet',
+    markSpanTooWide: 'That selection spans several blocks, so it cannot be marked — try a shorter one',
+    markFailed: (msg: string) => `Could not mark: ${msg}`,
+    undoFailed: (msg: string) => `Could not undo: ${msg}`,
+    rewriteInitFailed: (msg: string) => `Could not start the rewrite: ${msg}`,
+
+    markedToast: (text: string) => `Marked “${text}”`,
+    undo: 'Undo',
+  },
 }
