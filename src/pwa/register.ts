@@ -1,11 +1,13 @@
 /**
- * Service Worker 注册与更新检测。
+ * Service worker registration and update detection.
  *
- * 只在生产环境注册：dev 下 Vite 的模块地址带 query 与 HMR 时间戳，
- * 缓存策略会把它们搅乱，而且开发时根本不需要离线。
+ * Registered in production only: in dev Vite's module URLs carry query strings and HMR
+ * timestamps that would scramble the cache strategy, and offline support is not needed
+ * while developing anyway.
  *
- * 更新流程刻意做成「先问再换」：新 SW 装好会停在 waiting，等页面弹提示、
- * 用户点了才 skipWaiting 接管。否则正在读的书会被新版本资源抽掉。
+ * The update flow deliberately asks before switching: a newly installed SW waits, and
+ * only takes over (skipWaiting) once the page prompts and the user agrees. Otherwise
+ * the assets under a book being read would be pulled out from under it.
  */
 import { isNative } from '../platform'
 
@@ -14,7 +16,7 @@ export type UpdateHandler = () => void
 let waiting: ServiceWorker | null = null
 const handlers = new Set<UpdateHandler>()
 
-/** 有新版本可用时回调（已在等待中的会立即触发一次） */
+/** Called when a new version is available (one already waiting fires immediately) */
 export function onUpdateReady(fn: UpdateHandler): () => void {
   handlers.add(fn)
   if (waiting) fn()
@@ -28,7 +30,7 @@ function announce(worker: ServiceWorker) {
   for (const fn of handlers) fn()
 }
 
-/** 用户确认更新：让等待中的新 SW 接管，接管后刷新一次 */
+/** The user confirmed the update: let the waiting SW take over, then reload once */
 export function applyUpdate(): void {
   const worker = waiting
   if (!worker) return
@@ -41,20 +43,20 @@ export function applyUpdate(): void {
   worker.postMessage({ type: 'SKIP_WAITING' })
 }
 
-/** 回到前台时顺手查一次更新（浏览器自带的检查间隔可能长达一天） */
+/** Check for an update when returning to the foreground (the browser's own check can be a day apart) */
 const RECHECK_INTERVAL = 60 * 60 * 1000
 
 async function setup(): Promise<void> {
   const reg = await navigator.serviceWorker.register('./sw.js')
 
-  // 上次已经装好但用户没点重载的，这次进来直接提示
+  // An update installed last time but not reloaded into is prompted for straight away
   if (reg.waiting && navigator.serviceWorker.controller) announce(reg.waiting)
 
   reg.addEventListener('updatefound', () => {
     const installing = reg.installing
     if (!installing) return
     installing.addEventListener('statechange', () => {
-      // controller 为空说明这是首次安装，没有「旧版本」可言，不提示
+      // An empty controller means this is a first install: there is no "old version" to speak of, so no prompt
       if (installing.state === 'installed' && navigator.serviceWorker.controller) announce(installing)
     })
   })
@@ -69,12 +71,13 @@ async function setup(): Promise<void> {
 }
 
 export function registerServiceWorker(): void {
-  // 原生壳里资源已经在 APK 里了，SW 没有意义；而且它和 Capacitor 的
-  // WebViewAssetLoader 配合有坑（拦截的是 https://localhost 的自定义协议）
+  // Inside the native shell the assets already ship in the APK, so an SW is pointless;
+  // and it interacts badly with Capacitor's WebViewAssetLoader (which intercepts the
+  // custom https://localhost scheme)
   if (isNative) return
   if (!import.meta.env.PROD) return
   if (!('serviceWorker' in navigator)) return
   window.addEventListener('load', () => {
-    setup().catch((e) => console.warn('[moxue] Service Worker 注册失败', e))
+    setup().catch((e) => console.warn('[moxue] service worker registration failed', e))
   })
 }

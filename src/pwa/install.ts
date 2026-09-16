@@ -1,15 +1,16 @@
 /**
- * 「装到桌面」的状态。
+ * The install-as-an-app state.
  *
- * beforeinstallprompt 只发一次、且事件对象只能用一次（prompt() 调过就作废），
- * 所以必须集中收在一处：书架的引导条和设置里的「安装到桌面」共用同一份，
- * 谁先点谁消费掉，另一处要能立刻看到状态变了。
+ * beforeinstallprompt fires once, and the event object is single-use (calling prompt()
+ * spends it), so this has to live in one place: the shelf's banner and the Settings
+ * entry share it, whichever is tapped first consumes it, and the other sees the state
+ * change immediately.
  *
- * 四个状态对应四种该说的话：
- *   installed  已经是应用了
- *   prompt     能弹原生安装框
- *   ios        iOS Safari——不允许程序触发，只能照「分享 → 添加到主屏幕」手动来
- *   manual     浏览器没给出入口（不支持，或用户已经把安装框关掉过一次）
+ * Four states, four different things to say:
+ *   installed  already running as an app
+ *   prompt     the native install prompt can be raised
+ *   ios        iOS Safari — a page may not trigger it, so it is Share → Add to Home Screen by hand
+ *   manual     the browser offers no entry point (unsupported, or the user dismissed it once)
  */
 import { useEffect, useState } from 'react'
 
@@ -29,32 +30,32 @@ function emit() {
   for (const fn of listeners) fn()
 }
 
-/** 是否已经以独立窗口运行（即已装到桌面） */
+/** Whether it is already running as its own window (that is, installed) */
 export function isStandalone(): boolean {
   return (
     window.matchMedia?.('(display-mode: standalone)')?.matches === true ||
-    // iOS Safari 特有：从主屏图标打开时为 true
+    // iOS Safari only: true when opened from a home-screen icon
     (navigator as Navigator & { standalone?: boolean }).standalone === true
   )
 }
 
-/** 是否 iOS 上的 Safari——只有它能「添加到主屏幕」 */
+/** Whether this is Safari on iOS — the only one that can Add to Home Screen */
 function isIosSafari(): boolean {
   const ua = navigator.userAgent
-  // iPadOS 13 起 UA 伪装成 macOS，靠触摸点数认出来
+  // Since iPadOS 13 the UA pretends to be macOS; the touch-point count gives it away
   const isIos = /iP(hone|ad|od)/.test(ua) || (ua.includes('Macintosh') && navigator.maxTouchPoints > 1)
   if (!isIos) return false
-  // iOS 上的 Chrome / Firefox / Edge 都是 WebKit 套壳，没有「添加到主屏幕」
+  // Chrome / Firefox / Edge on iOS are all WebKit shells and have no Add to Home Screen
   return !/CriOS|FxiOS|EdgiOS|OPiOS|Mercury/i.test(ua)
 }
 
-/** 在 main.tsx 里于渲染前调用一次：beforeinstallprompt 发得早，错过就没了 */
+/** Call once from main.tsx before rendering: beforeinstallprompt fires early and is gone if missed */
 export function initInstallPrompt(): void {
   if (initialized) return
   initialized = true
 
   window.addEventListener('beforeinstallprompt', (e) => {
-    e.preventDefault() // 拦掉浏览器自带的迷你信息条，改由应用自己的入口触发
+    e.preventDefault() // suppress the browser's own mini-infobar; the app's own entry points trigger it
     deferred = e as BeforeInstallPromptEvent
     emit()
   })
@@ -64,14 +65,16 @@ export function initInstallPrompt(): void {
     emit()
   })
 
-  // 排查「为什么没看到安装按钮」用：等一会儿还没动静，就是当前浏览器给不出入口。
-  // 多数国产 Chromium 套壳（UC / QQ / 夸克 / 各家自带浏览器）不实现 PWA 安装，
-  // 事件永远不来；真 Chrome 上也可能是此前把安装提示关掉过一次。
+  // For debugging "why is there no install button": if nothing arrives after a while,
+  // the browser offers no entry point. Most Chinese Chromium reskins (UC / QQ / Quark /
+  // the bundled vendor browsers) never implement PWA install, so the event never comes;
+  // on real Chrome it may also be that the install prompt was dismissed once before.
   setTimeout(() => {
     if (deferred || installed || isStandalone()) return
     console.info(
-      '[moxue] 未收到 beforeinstallprompt：当前浏览器暂时给不出安装入口，应用内无法触发安装。' +
-        'Chrome / Edge / Safari / 三星浏览器可以装。',
+      '[moxue] no beforeinstallprompt received: this browser is not offering an install ' +
+        'entry point, so the app cannot trigger installation. Chrome / Edge / Safari / ' +
+        'Samsung Internet can.',
     )
   }, 5000)
 }
@@ -90,11 +93,11 @@ export function installState(): InstallState {
   return 'manual'
 }
 
-/** 弹原生安装框，返回用户在框里选了什么 */
+/** Raise the native install prompt and report what the user chose in it */
 export async function promptInstall(): Promise<'accepted' | 'dismissed' | 'unavailable'> {
   const evt = deferred
   if (!evt) return 'unavailable'
-  deferred = null // 事件只能用一次，用完作废，免得再点一次抛错
+  deferred = null // the event is single-use, so spend it here rather than throwing on a second tap
   emit()
   await evt.prompt()
   const { outcome } = await evt.userChoice
@@ -103,11 +106,11 @@ export async function promptInstall(): Promise<'accepted' | 'dismissed' | 'unava
   return outcome
 }
 
-/** 订阅安装状态（引导条与设置共用） */
+/** Subscribe to the install state (shared by the banner and Settings) */
 export function useInstallState(): InstallState {
   const [state, setState] = useState<InstallState>(installState)
   useEffect(() => {
-    setState(installState()) // 订阅前事件可能已经来过了，先对齐一次
+    setState(installState()) // the event may already have fired before subscribing, so sync once
     return subscribeInstall(() => setState(installState()))
   }, [])
   return state
