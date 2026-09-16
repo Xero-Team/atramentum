@@ -34,7 +34,7 @@
 - **📥 Import / 📤 Export** — zip / tar.gz / rar archives, folders, PDFs (page text) and EPUBs (chaptered). Export any course back as a zip, highlights and Q&A included (`moxue-notes.json`); re-import it and your notes land back on the book. Keys never leak into exports.
 - **🌓 Light / dark** — A second palette in the same ink idiom: night-ink ground, rice-paper white text, and 青 (cyan) taking the accent role from cinnabar. Flip it from the ☾ / ☀ in the title bar, or pick light / dark / follow-system under Settings.
 - **📱 Phones & tablets** — Responsive throughout: on narrow screens the table of contents becomes a slide-in drawer, header actions collapse into a ⋯ menu and the AI panel goes full-screen. Card actions that used to be hover-only are now always reachable by touch, with a category dropdown standing in for drag-and-drop.
-- **📲 Installable (PWA)** — Add it to your home screen and it opens full-screen like an app, with no address bar. The app shell is precached, so books you have already opened stay readable with the network off; asking AI obviously still needs a connection. Updates are offered rather than forced — the reload prompt waits until you tap it, and stays quiet while a book is being generated.
+- **📲 Installable (PWA)** — Add it to your home screen and it opens full-screen like an app, with no address bar. The app shell is precached, so books you have already opened stay readable with the network off; asking AI obviously still needs a connection. Offered as a dismissible banner on the shelf, and always reachable from **Settings → 安装到桌面** — dismissing the banner never locks you out. Updates are offered rather than forced: the reload prompt waits until you tap it, and stays quiet while a book is being generated. Android's system back closes whatever is open — drawer, dialog, AI panel — instead of leaving the page, since a standalone window has no back button of its own.
 
 ### Privacy & data
 
@@ -102,7 +102,7 @@ Licensed under the [Apache License 2.0](LICENSE).
 - **📥 导入 / 📤 导出**——zip / tar.gz / rar 压缩包、文件夹、PDF（逐页文本）、EPUB（按章）；任何课件可导出回 zip，划词标注与问答一并带走（`moxue-notes.json`），重新导入即回到书上。密钥永不进导出文件。
 - **🌓 浅色 / 深色（水墨）**——同一套墨色语汇下的第二套配色：夜墨底、宣纸白字，青替朱砂作强调色。标题栏 ☾ / ☀ 一键切换，或在「设置 · 外观」里选浅色 / 深色 / 跟随系统。
 - **📱 手机与平板**——全面响应式：窄屏下目录变左侧抽屉、头部动作收进 ⋯ 菜单、AI 面板整屏浮出；原先只在悬停时出现的卡片按钮改为触屏常显，并用分类下拉补齐拖拽之外的归档路径。
-- **📲 可安装（PWA）**——「添加到主屏幕」后全屏打开，没有浏览器地址栏。应用外壳已预缓存，读过的书断网也能继续翻；问 AI 这类自然还是要有网。新版本不强制更新：重载提示等你点了才换，且正在著书时不会弹出来打扰。
+- **📲 可安装（PWA）**——「添加到主屏幕」后全屏打开，没有浏览器地址栏。应用外壳已预缓存，读过的书断网也能继续翻；问 AI 这类自然还是要有网。书架上有引导条，设置里也有常驻的「安装到桌面」入口——引导条关掉了也不会没处装。新版本不强制更新：重载提示等你点了才换，且正在著书时不会弹出来打扰。Android 的系统返回键会先关掉当前打开的浮层（目录抽屉 / 对话框 / AI 面板），而不是直接跳出应用——独立窗口里本来就没有自己的返回按钮。
 
 ### 隐私与数据
 
