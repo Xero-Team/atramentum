@@ -17,15 +17,15 @@ jobs:
   apk:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
 
       # AGP 8.13 needs JDK 17 or newer; 21 it is
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '21'
@@ -63,13 +63,13 @@ jobs:
       # apksigner's certificate fingerprint — if it differs between two builds,
       # this has broken again.
       - name: Cache the debug keystore (so every build signs identically)
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.config/.android/debug.keystore
           key: android-debug-keystore-v1
 
       - name: Cache Gradle
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.gradle/caches
@@ -138,7 +138,7 @@ jobs:
       - name: Prepare the release artefact
         run: cp android/app/build/outputs/apk/debug/app-debug.apk moxue-android.apk
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: moxue-debug-apk
           path: moxue-android.apk
@@ -150,7 +150,7 @@ jobs:
       # https://github.com/Xero-Team/atramentum/releases/latest/download/moxue-android.apk
       # An attachment of the same name is replaced rather than piling up.
       - name: Publish to the Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: android-latest
           name: Atramentum Android · rolling build
