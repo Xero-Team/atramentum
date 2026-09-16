@@ -158,6 +158,28 @@ export const zh = {
     markedToast: (text: string) => `已标注「${text}」`,
     undo: '撤销',
   },
+
+  /**
+   * Everything `describeAIError` can say. These surface in Settings and in the
+   * AI panel, so they are user-facing even though they live in the network layer.
+   */
+  aiError: {
+    stopped: '已停止',
+    connectTimeout: (sec: number) => `连接超时（${sec} 秒未收到响应头）：端点不可达、被中间层缓冲或代理拦截`,
+    streamIdle: (sec: number) => `流式响应超过 ${sec} 秒无数据，连接疑似已被对端挂起，已中断`,
+    noStream: '响应无内容流（可能被浏览器扩展或代理拦截）',
+    timeout: (label: string, sec: number) => `${label}请求超过 ${sec} 秒未完成，已中止`,
+    emptyText: '空响应：模型未返回文本',
+    emptyBody: '空响应：模型未返回正文（推理模型请看思考输出是否为空）',
+    anthropicEmpty: 'Anthropic 空响应',
+    fetchModelsFailed: '拉取模型失败',
+    auth: (s: number) => `鉴权失败（${s}）：API Key 无效或无权限，请到设置里检查密钥。`,
+    notFound: '端点不存在（404）：请检查请求地址是否完整（通常需含 /v1 等版本路径）。',
+    rateLimited: '触发限流（429）：请求过于频繁或余额不足，请稍后再试。',
+    serverError: (s: number) => `服务端错误（${s}）：模型服务暂不可用，请稍后再试。`,
+    network:
+      '网络请求失败：可能是 CORS 拦截或地址不可达。浏览器直连要求端点允许跨域；也可自建代理后填入代理地址。',
+  },
 }
 
 /** Shape every locale must satisfy. `en.ts` is checked against it. */

@@ -163,4 +163,24 @@ export const en: Dict = {
     markedToast: (text: string) => `Marked “${text}”`,
     undo: 'Undo',
   },
+
+  aiError: {
+    stopped: 'Stopped',
+    connectTimeout: (sec: number) =>
+      `Connection timed out (no response headers within ${sec}s): the endpoint is unreachable, buffered by an intermediary, or blocked by a proxy`,
+    streamIdle: (sec: number) => `The stream sent nothing for ${sec}s, so the far end is probably hanging — aborted`,
+    noStream: 'The response carries no content stream (a browser extension or proxy may be intercepting it)',
+    timeout: (label: string, sec: number) => `${label} did not finish within ${sec}s — aborted`,
+    emptyText: 'Empty response: the model returned no text',
+    emptyBody:
+      'Empty response: the model returned no content (for reasoning models, check whether the thinking output is empty too)',
+    anthropicEmpty: 'Empty response from Anthropic',
+    fetchModelsFailed: 'Could not fetch models',
+    auth: (s: number) => `Authentication failed (${s}): the API key is invalid or lacks permission — check it in Settings.`,
+    notFound: 'Endpoint not found (404): check that the base URL is complete — it usually needs a version path such as /v1.',
+    rateLimited: 'Rate limited (429): too many requests, or the account is out of credit. Try again shortly.',
+    serverError: (s: number) => `Server error (${s}): the model service is temporarily unavailable. Try again shortly.`,
+    network:
+      'Request failed — possibly a CORS block or an unreachable address. Calling an endpoint straight from the browser requires it to allow cross-origin requests; you can also point the base URL at your own proxy.',
+  },
 }

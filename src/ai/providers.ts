@@ -13,6 +13,9 @@
  * - extractJSON / describeAIError / isAbortError 工具
  */
 import type { AIProviderConfig } from '../types/ai'
+// The dictionary is read non-reactively here: these messages are built at throw
+// time, not rendered, so there is nothing to subscribe to.
+import { tr } from '../i18n'
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant'
@@ -286,7 +289,7 @@ async function fetchAI(url: string, init: RequestInit): Promise<Response> {
     if (external.aborted) ctrl.abort(external.reason)
     else external.addEventListener('abort', onAbort)
   }
-  const timer = setTimeout(() => ctrl.abort(new AIError(`连接超时（${Math.round(CONNECT_TIMEOUT_MS / 1000)} 秒未收到响应头）：端点不可达、被中间层缓冲或代理拦截`)), CONNECT_TIMEOUT_MS)
+  const timer = setTimeout(() => ctrl.abort(new AIError(tr().aiError.connectTimeout(Math.round(CONNECT_TIMEOUT_MS / 1000)))), CONNECT_TIMEOUT_MS)
   try {
     return await fetch(url, { ...init, signal: ctrl.signal })
   } finally {
@@ -325,7 +328,7 @@ async function chatOpenAICompatible(config: AIProviderConfig, opts: ChatOptions)
     if (!res.ok) throw await toAIError(res, 'API')
     const data = await res.json()
     const content = data?.choices?.[0]?.message?.content
-    if (typeof content !== 'string' || !content) throw new AIError('空响应：模型未返回文本')
+    if (typeof content !== 'string' || !content) throw new AIError(tr().aiError.emptyText)
     return content
   })
 }
@@ -359,7 +362,7 @@ async function chatStreamOpenAICompatible(config: AIProviderConfig, opts: Stream
       // 心跳/注释等非 JSON 载荷，静默跳过
     }
   })
-  if (!full) throw new AIError('空响应：模型未返回正文（推理模型请看思考输出是否为空）')
+  if (!full) throw new AIError(tr().aiError.emptyBody)
   return full
 }
 
@@ -397,7 +400,7 @@ async function chatJSONStreamOpenAICompatible(config: AIProviderConfig, opts: St
       // 心跳/注释等非 JSON 载荷，静默跳过
     }
   })
-  if (!full) throw new AIError('空响应：模型未返回文本')
+  if (!full) throw new AIError(tr().aiError.emptyText)
   return full
 }
 
@@ -449,7 +452,7 @@ async function chatAnthropic(config: AIProviderConfig, opts: ChatOptions): Promi
       if (text === null && block.type === 'text' && typeof block.text === 'string') text = block.text
     }
     if (text !== null) return text
-    throw new AIError('Anthropic 空响应')
+    throw new AIError(tr().aiError.anthropicEmpty)
   })
 }
 
@@ -488,7 +491,7 @@ async function chatStreamAnthropic(config: AIProviderConfig, opts: StreamOptions
       // 非 JSON 行，跳过
     }
   })
-  if (!full) throw new AIError('Anthropic 空响应')
+  if (!full) throw new AIError(tr().aiError.anthropicEmpty)
   return full
 }
 
@@ -535,7 +538,7 @@ async function chatJSONStreamAnthropic(config: AIProviderConfig, opts: StreamOpt
       // 非 JSON 行，跳过
     }
   })
-  if (!full) throw new AIError('Anthropic 空响应')
+  if (!full) throw new AIError(tr().aiError.anthropicEmpty)
   return full
 }
 
@@ -556,7 +559,7 @@ async function readWithIdleGuard(
       read,
       new Promise<never>((_, reject) => {
         timer = setTimeout(
-          () => reject(new AIError(`流式响应超过 ${Math.round(SSE_IDLE_MS / 1000)} 秒无数据，连接疑似已被对端挂起，已中断`)),
+          () => reject(new AIError(tr().aiError.streamIdle(Math.round(SSE_IDLE_MS / 1000)))),
           SSE_IDLE_MS,
         )
       }),
@@ -572,7 +575,7 @@ async function readWithIdleGuard(
 /** 消费 SSE 响应体：逐行抽出 data: 载荷回调（event:/注释/空行两类协议都不需要） */
 async function consumeSSE(res: Response, onData: (data: string) => void): Promise<void> {
   const reader = res.body?.getReader()
-  if (!reader) throw new AIError('响应无内容流（可能被浏览器扩展或代理拦截）')
+  if (!reader) throw new AIError(tr().aiError.noStream)
   const decoder = new TextDecoder()
   let buf = ''
   const handleLine = (line: string) => {
@@ -611,7 +614,7 @@ async function withDeadline<T>(
     else external.addEventListener('abort', onAbort)
   }
   const timer = setTimeout(
-    () => ctrl.abort(new AIError(`${label}请求超过 ${Math.round(ms / 1000)} 秒未完成，已中止`)),
+    () => ctrl.abort(new AIError(tr().aiError.timeout(label, Math.round(ms / 1000)))),
     ms,
   )
   try {
@@ -627,19 +630,19 @@ async function toAIError(res: Response, label: string): Promise<AIError> {
   return new AIError(`${label} ${res.status}: ${text.slice(0, 300)}`, res.status)
 }
 
-/** 把各种失败归因为用户可操作的中文提示 */
+/** Turn any failure into a message the user can act on */
 export function describeAIError(e: unknown): string {
-  if (isAbortError(e)) return '已停止'
+  if (isAbortError(e)) return tr().aiError.stopped
   if (e instanceof AIError) {
     const s = e.status
-    if (s === 401 || s === 403) return `鉴权失败（${s}）：API Key 无效或无权限，请到设置里检查密钥。`
-    if (s === 404) return '端点不存在（404）：请检查请求地址是否完整（通常需含 /v1 等版本路径）。'
-    if (s === 429) return '触发限流（429）：请求过于频繁或余额不足，请稍后再试。'
-    if (s !== undefined && s >= 500) return `服务端错误（${s}）：模型服务暂不可用，请稍后再试。`
+    if (s === 401 || s === 403) return tr().aiError.auth(s)
+    if (s === 404) return tr().aiError.notFound
+    if (s === 429) return tr().aiError.rateLimited
+    if (s !== undefined && s >= 500) return tr().aiError.serverError(s)
     return e.message
   }
   if (e instanceof TypeError) {
-    return '网络请求失败：可能是 CORS 拦截或地址不可达。浏览器直连要求端点允许跨域；也可自建代理后填入代理地址。'
+    return tr().aiError.network
   }
   return (e as Error)?.message ?? String(e)
 }
@@ -667,14 +670,14 @@ export async function listModels(config: AIProviderConfig): Promise<string[]> {
     const res = await fetch(`${trimSlash(config.baseURL)}/models?limit=100`, {
       headers: { ...anthropicHeaders(config), Accept: 'application/json' },
     })
-    if (!res.ok) throw await toAIError(res, '拉取模型失败')
+    if (!res.ok) throw await toAIError(res, tr().aiError.fetchModelsFailed)
     const data = await res.json()
     return (Array.isArray(data?.data) ? data.data : []).map((m: { id?: string }) => m.id).filter(Boolean) as string[]
   }
   const res = await fetch(`${trimSlash(config.baseURL)}/models`, {
     headers: { Authorization: `Bearer ${config.apiKey}`, Accept: 'application/json' },
   })
-  if (!res.ok) throw await toAIError(res, '拉取模型失败')
+  if (!res.ok) throw await toAIError(res, tr().aiError.fetchModelsFailed)
   const data = await res.json()
   const arr = Array.isArray(data?.data) ? data.data : Array.isArray(data?.models) ? data.models : []
   return arr
