@@ -5,5 +5,7 @@ export default defineConfig({
     // categoryStore 依赖 localStorage（zustand persist），用 jsdom 提供
     environment: 'jsdom',
     include: ['src/**/*.test.{ts,tsx}'],
+    // Pins the UI language to Chinese (jsdom reports en-US); see the file's header
+    setupFiles: ['./src/test-setup.ts'],
   },
 })
