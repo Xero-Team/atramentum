@@ -1,14 +1,16 @@
-// make-icons.mjs —— 从印章 SVG 光栅化出全部应用图标（PWA + Android）。
+// make-icons.mjs — rasterise every app icon (PWA + Android) out of the seal SVG.
 //
-// 【这个脚本是手动跑的，不接进 npm scripts】
-// 构建机（Cloudflare Pages / GitHub Actions）上没有 Chrome，图标又极少改动，
-// 所以生成结果直接提交仓库。仅在印章样式变了、或要加新尺寸时手动执行：
+// [This script is run by hand; it is deliberately not wired into npm scripts]
+// The build machines (Cloudflare Pages / GitHub Actions) have no Chrome, and icons
+// change about once a blue moon, so the output is committed. Run it by hand only when
+// the seal design changes or a new size is needed:
 //   node scripts/make-icons.mjs
 //
-// 产出两批：
-//   public/                    PWA：manifest 图标 + apple-touch-icon
-//   resources/android/res/     Android：各密度启动图标 + 自适应图标定义
-//                              （CI 里覆盖掉 cap add android 生成的默认图标）
+// Two sets come out of it:
+//   public/                    PWA: the manifest icons + apple-touch-icon
+//   resources/android/res/     Android: launcher icons per density + the adaptive icon
+//                              definitions (CI copies these over the defaults
+//                              cap add android generates)
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -29,25 +31,27 @@ const CHROME_CANDIDATES = [
 
 function findChrome() {
   const hit = CHROME_CANDIDATES.find((p) => existsSync(p))
-  if (!hit) throw new Error('找不到 Chrome / Edge，图标无法生成')
+  if (!hit) throw new Error('No Chrome / Edge found, so the icons cannot be generated')
   return hit
 }
 
-// 印章配色与站内一致（浅色主题的朱砂印）。
-// 刻意不跟随深浅主题：桌面图标要稳定，不该因为用户在站内切了主题就换样子。
+// The seal colours match the app (the cinnabar seal of the light theme).
+// Deliberately not theme-aware: a desktop icon should be stable, not change shape
+// because the user flipped a switch inside the app.
 const CINNABAR = '#c03f2b'
 const PAPER = '#f5f1e8'
-// 启动画面底色：跟站内的 --c-paper 对齐，深色走 values-night（跟系统，不跟站内开关——
-// 启动画面在应用加载前就画出来了，那时读不到 localStorage）
+// Splash background: aligned with the app's --c-paper, with dark served from values-night
+// (it follows the system rather than the in-app switch — the splash is drawn before the
+// app loads, when localStorage is not readable yet)
 const SPLASH_LIGHT = '#F5F1E8'
 const SPLASH_DARK = '#101518'
 
 /**
- * @param size   输出边长（px）
- * @param shape  'rect' 圆角印章 | 'circle' 圆形印章（Android 的圆形启动图标）
- * @param radius 圆角半径（viewBox 单位，仅 shape='rect'）
- * @param font   「墨」字号（viewBox 单位）
- * @param bg     'seal' 画印章底 | 'none' 只画字（自适应图标的前景层要透明）
+ * @param size   output edge length, in px
+ * @param shape  'rect' rounded seal | 'circle' round seal (Android's circular launcher icon)
+ * @param radius corner radius in viewBox units (only for shape='rect')
+ * @param font   the 墨 glyph size, in viewBox units
+ * @param bg     'seal' paints the seal background | 'none' draws the glyph alone (an adaptive icon's foreground layer must be transparent)
  */
 function iconHtml({ size, shape = 'rect', radius = 10, font = 34, bg = 'seal' }) {
   const backdrop =
@@ -71,20 +75,22 @@ function iconHtml({ size, shape = 'rect', radius = 10, font = 34, bg = 'seal' })
 
 /* ── PWA ── */
 const PWA_TARGETS = [
-  // 常规图标：圆角印章、四角透明，浏览器原样展示
+  // The regular icon: a rounded seal with transparent corners, shown by the browser as-is
   { dir: PUBLIC_DIR, file: 'icon-192.png', size: 192, radius: 10, font: 34, bg: 'seal' },
   { dir: PUBLIC_DIR, file: 'icon-512.png', size: 512, radius: 10, font: 34, bg: 'seal' },
-  // 面具图标（Android 自适应）：满幅底色 + 缩小的字，任何裁切形状都不会切到「墨」
-  // 安全区是中心直径 80% 的圆，所以字号压到 30
+  // The mask icon (Android adaptive): full-bleed background with a smaller glyph, so no crop shape can clip the 墨
+  // The safe zone is a circle 80% of the width across the centre, so the glyph drops to 30
   { dir: PUBLIC_DIR, file: 'icon-maskable-512.png', size: 512, radius: 0, font: 30, bg: 'full' },
-  // iOS 主屏图标：iOS 自己会做圆角，且不支持透明（透明会被合成成黑底）
+  // The iOS home-screen icon: iOS rounds the corners itself and does not support transparency (it composites onto black)
   { dir: PUBLIC_DIR, file: 'apple-touch-icon.png', size: 180, radius: 0, font: 34, bg: 'full' },
 ]
 
 /* ── Android ──
-   自适应图标是 108dp 画布：可见区 72dp，安全区是中心直径 66dp 的圆。
-   前景层用透明底 + 白字，底色由 @color 提供，所以字号要按 108dp 画布折算——
-   这里取 26（≈44dp），占安全区直径的 2/3，遮罩怎么裁都切不到。 */
+   An adaptive icon is a 108dp canvas: 72dp visible, with a safe zone that is a circle
+   66dp across the centre. The foreground layer is transparent with a white glyph and
+   the background colour comes from @color, so the glyph size is worked out against the
+   108dp canvas — 26 here (about 44dp), two thirds of the safe zone, which no mask can
+   clip. */
 const DENSITIES = [
   { dir: 'mipmap-mdpi', icon: 48, fg: 108 },
   { dir: 'mipmap-hdpi', icon: 72, fg: 162 },
@@ -99,24 +105,25 @@ const ANDROID_TARGETS = DENSITIES.flatMap(({ dir, icon, fg }) => [
   { dir: join(ANDROID_RES, dir), file: 'ic_launcher_foreground.png', size: fg, radius: 0, font: 26, bg: 'none' },
 ])
 
-/** 纯色/结构类的资源直接写 XML，不需要 PNG */
+/** Solid-colour and structural resources are written as XML; no PNG needed */
 const ANDROID_XML = {
-  // 品牌色都收在这里，和上面的常量一处维护
+  // Brand colours are collected here, maintained in one place alongside the constants above
   'values/moxue_colors.xml': `<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 名字都带 moxue_ 前缀，免得和模板自带的 ic_launcher_background 撞上 -->
+    <!-- Every name is prefixed moxue_ so it cannot collide with the template's own ic_launcher_background -->
     <color name="moxue_launcher_background">${CINNABAR.toUpperCase()}</color>
     <color name="moxue_splash_background">${SPLASH_LIGHT}</color>
 </resources>
 `,
   'values-night/moxue_colors.xml': `<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 只覆盖需要变的那个；launcher_background 没列在这儿，会回退到 values/ -->
+    <!-- Only the one that changes is overridden; launcher_background is not listed here and falls back to values/ -->
     <color name="moxue_splash_background">${SPLASH_DARK}</color>
 </resources>
 `,
-  // Android 11 及以下的启动底：模板自带的是一张 Capacitor logo 的 PNG，
-  // CI 里会先把那些 splash.png 删掉（同名会冲突），换成这张纯色
+  // The splash background for Android 11 and below: the template ships a Capacitor logo
+  // PNG, and CI deletes those splash.png files first (the name would collide) before
+  // dropping this solid colour in
   'drawable/splash.xml': `<?xml version="1.0" encoding="utf-8"?>
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:drawable="@color/moxue_splash_background" />
@@ -156,7 +163,7 @@ function main() {
           `--user-data-dir=${join(work, 'profile')}`,
           `--window-size=${t.size},${t.size}`,
           `--screenshot=${outPath}`,
-          // 前景层与圆角印章的四角要透明，否则深色标签栏/遮罩上会露出白角
+          // The foreground layer and the rounded seal need transparent corners, or a dark tab bar or mask would show white ones
           '--default-background-color=00000000',
           `file:///${htmlPath.replace(/\\/g, '/')}`,
         ],
@@ -175,8 +182,8 @@ function main() {
   } finally {
     rmSync(work, { recursive: true, force: true })
   }
-  console.log(`\nPWA 图标 → ${PUBLIC_DIR}`)
-  console.log(`Android 图标 → ${ANDROID_RES}`)
+  console.log(`\nPWA icons → ${PUBLIC_DIR}`)
+  console.log(`Android icons → ${ANDROID_RES}`)
 }
 
 main()

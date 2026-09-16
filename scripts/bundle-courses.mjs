@@ -1,7 +1,7 @@
 // bundle-courses.mjs
-// 把 src/builtin/ 下的内置课件（当前仅「墨痕使用指南」）拷贝进 public/courses/ 并生成 manifest.json。
-// - 本机开发：npm run course:bundle（predev/prebuild 自动触发），覆盖 public/courses
-// - CI（GitHub Actions）：源码随仓库提交，总是可用；脚本保持幂等
+// Copy the built-in courses under src/builtin/ into public/courses/ and write manifest.json.
+// - Local development: npm run course:bundle (triggered by predev/prebuild), overwriting public/courses
+// - CI (GitHub Actions): the sources are committed, so it always works; the script is idempotent
 import { cpSync, existsSync, mkdirSync, readdirSync, statSync, rmSync, writeFileSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 
@@ -17,13 +17,13 @@ const FOLDER_COURSES = [
   { id: 'guide-en', title: 'Atramentum User Guide', seal: 'G', desc: 'A tour of the features: shelf, reading, Ask AI, Write with AI, import and export', category: '入门', lang: 'en' },
 ]
 
-// 只拷贝文本扩展名；排除二进制 / 元数据以控制部署体积
+// Text extensions only; binaries and metadata are excluded to keep the deployment small
 const INCLUDE_EXT = new Set([
   '.md', '.txt', '.c', '.h', '.cpp', '.hpp', '.rs', '.toml', '.json',
   '.yaml', '.yml', '.csv', '.cfg', '.sh', '.py', '.S', '.asm', '.mk',
 ])
 const EXCLUDE_NAMES = new Set(['.git', '.claude', 'target', '__pycache__'])
-const MAX_FILE = 2 * 1024 * 1024 // 单文件上限 2MB
+const MAX_FILE = 2 * 1024 * 1024 // 2MB per file
 
 function shouldCopy(relPath) {
   const parts = relPath.split(/[\\/]/)
@@ -31,7 +31,7 @@ function shouldCopy(relPath) {
   if (relPath.endsWith('.zip')) return false
   const base = parts[parts.length - 1]
   if (!base.includes('.')) {
-    // 无扩展名：Makefile 之类允许
+    // No extension: Makefile and the like are allowed
     return base === 'Makefile'
   }
   const ext = '.' + (base.split('.').pop() || '').toLowerCase()
@@ -41,7 +41,7 @@ function shouldCopy(relPath) {
 function walk(dir, base, out) {
   for (const name of readdirSync(dir)) {
     const abs = join(dir, name)
-    // manifest 里的路径恒为 posix 分隔符（Windows 上 relative() 会给反斜杠，直接写进 manifest 会让前端路径解析全挂）
+    // Manifest paths are always posix (on Windows relative() hands back backslashes, and writing those into the manifest breaks path resolution on the front end)
     const rel = relative(base, abs).split(sep).join('/')
     if (EXCLUDE_NAMES.has(name)) continue
     let st
@@ -63,7 +63,7 @@ function copyCourse(srcDir, id) {
   rmSync(dest, { recursive: true, force: true })
   mkdirSync(dest, { recursive: true })
   if (!existsSync(srcDir)) {
-    console.warn(`  ⚠ 内置课件源不存在，跳过：${srcDir}`)
+    console.warn(`  ⚠ built-in course source missing, skipping: ${srcDir}`)
     return []
   }
   const files = []
