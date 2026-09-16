@@ -110,6 +110,35 @@ jobs:
           sed -i 's#<item name="android:background">@drawable/splash</item>#&\n        <item name="windowSplashScreenBackground">@color/moxue_splash_background</item>#' "$STYLES"
           grep -q 'windowSplashScreenBackground' "$STYLES" || { echo "::error::the splash patch did not apply"; exit 1; }
 
+      # Handing a downloaded APK to the system installer needs this permission, and
+      # Capacitor's template does not declare it (nothing in the template installs
+      # anything). Without it the intent throws and the app falls back to sending
+      # the user to the browser — see src/native/appUpdate.ts.
+      - name: Allow the app to hand an APK to the installer
+        run: |
+          M=android/app/src/main/AndroidManifest.xml
+          if grep -q 'REQUEST_INSTALL_PACKAGES' "$M"; then
+            echo "already declared"
+            exit 0
+          fi
+          grep -q '<application' "$M" || { echo "::error::AndroidManifest.xml has changed shape; the install-permission patch needs updating"; exit 1; }
+          sed -i 's#<application#<uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />\n\n    <application#' "$M"
+          grep -q 'REQUEST_INSTALL_PACKAGES' "$M" || { echo "::error::the install-permission patch did not apply"; exit 1; }
+
+      # The in-app update check compares the installed app's versionCode against the
+      # build number in the release body, so Capacitor's constant 1 would make every
+      # published build look like an update. Both numbers come from the run number,
+      # deliberately — the check in src/native/appUpdate.ts reads the other one.
+      - name: Stamp the build number into the APK
+        run: |
+          G=android/app/build.gradle
+          RUN=${{ github.run_number }}
+          grep -q 'versionCode 1$' "$G" || { echo "::error::build.gradle has changed shape; the version stamp needs updating"; exit 1; }
+          grep -q 'versionName "1.0"$' "$G" || { echo "::error::build.gradle has changed shape; the version stamp needs updating"; exit 1; }
+          sed -i "s/versionCode 1$/versionCode ${RUN}/" "$G"
+          sed -i "s/versionName \"1.0\"$/versionName \"1.0.${RUN}\"/" "$G"
+          grep -n 'versionCode\|versionName' "$G"
+
       - name: Build the debug APK
         working-directory: android
         run: |
