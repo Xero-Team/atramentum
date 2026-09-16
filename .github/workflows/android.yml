@@ -111,7 +111,16 @@ jobs:
           ls -lh "$APK"
           BT=$(ls -d "$ANDROID_HOME"/build-tools/*/ | tail -1)
           "${BT}apksigner" verify --print-certs "$APK"
-          "${BT}aapt2" dump badging "$APK" | grep -E "^package|^application-label|^sdkVersion|^native-code" || true
+          "${BT}aapt2" dump badging "$APK" | grep -E "^package|^application-label:|^sdkVersion|^native-code" || true
+
+          # AGP 生成的 debug keystore 到底落在哪：缓存它才能让每次构建签名一致，
+          # 而 ~/.android/debug.keystore 实测不存在，得先找出来
+          echo "--- 定位 debug keystore ---"
+          echo "HOME=$HOME"
+          echo "ANDROID_USER_HOME=${ANDROID_USER_HOME:-<unset>}  ANDROID_SDK_HOME=${ANDROID_SDK_HOME:-<unset>}"
+          echo "user.home=$(java -XshowSettings:properties -version 2>&1 | grep 'user.home' | head -1)"
+          ls -la "$HOME/.android" 2>&1 | head -5
+          find "$HOME" /usr/local/lib/android /root -maxdepth 5 -name '*.keystore' 2>/dev/null | head -10
 
       # 稳定的文件名，Release 的下载地址才不会每次都变
       - name: 准备发布产物
