@@ -160,6 +160,165 @@ export const zh = {
   },
 
   /**
+   * The AI panel. `payload` and `system` are prompts rather than UI copy, but
+   * they are translated too: a Chinese system prompt makes the model answer in
+   * Chinese no matter what language the interface is in.
+   */
+  ask: {
+    title: '问 AI',
+    history: '历史',
+    historyHint: '本书的划词标注与问答历史（从左侧滑出）',
+    close: '关闭问答',
+
+    setupTitle: '先配置 AI 接入',
+    setupBody: '填入你的 API 请求地址与密钥即可开问（支持 OpenAI 兼容端点与 Anthropic；密钥只存本机浏览器）。',
+    setupAction: '去设置',
+    intro: (canEdit: boolean) =>
+      '提问后我会按需翻阅、检索本课件再作答，查证过程见「工作流程」；也可以直接追问。' +
+      '在正文划选一段内容点「问」印，会自动带上上下文。' +
+      (canEdit ? '切到「改写本节」可让 AI 直接修改当前小节。' : ''),
+
+    flowTitle: '工 作 流 程',
+    stepDetail: '详情',
+    stepCollapse: '收起',
+    thinking: '正在整理回答……',
+
+    apply: '应用到本节',
+    applied: '✓ 已应用到本节',
+    applyHint: '满意再应用，不满意可继续提要求',
+
+    modeAsk: '问 AI',
+    modeEdit: '改写本节',
+    includeSection: '附上本节全文',
+
+    placeholderEdit: '输入修改要求，如：精简本节 / 补一个例子 / 练习出难一点…',
+    placeholderAsk: '问点什么吧…我会按需翻阅本课件作答',
+    hintEdit: '结果可「应用」写回本节',
+    hintTouch: '回车换行 · 点「发送」送出',
+    hintDesktop: 'Enter 发送 · Shift+Enter 换行',
+    stop: '■ 停止',
+    send: '发送 ↵',
+
+    saved: '已存',
+    notConfigured: '尚未配置 AI：请先填写请求地址与 API Key。',
+    sectionNotLoaded: '本节内容尚未加载，无法改写。',
+    rewriteLabel: (instruction: string) => `改写：${instruction}`,
+
+    /** Prompt scaffolding. `system` is the rewrite mode's system prompt. */
+    system:
+      '你是「墨痕」AI 陪学的课件编辑。用户会给出一份课件的当前正文与修改要求，请按要求改写。' +
+      '只输出改写后的完整 Markdown 正文（从 H1 标题开始到结尾），保持原结构（H1 → blockquote 目标 → --- 分小节 → 自我检测练习），' +
+      '代码块/ASCII 图用无语言标注的 ``` 围栏；不要任何解释，不要用代码围栏包裹整篇。',
+
+    payload: {
+      course: '课件',
+      section: '所在节',
+      before: '选区前文',
+      after: '选区后文',
+      selection: '用户划选',
+      reading: '正在阅读',
+      sectionFull: '本节全文',
+      question: '问题',
+      currentText: '当前正文',
+      editRequest: '修改要求',
+      explainSelection: '请解释划选内容。',
+      outputRewrite: '请输出改写后的完整正文。',
+    },
+  },
+
+  /** The Agent loop behind "Ask AI": step labels the user watches, and the prompts. */
+  agent: {
+    systemIntro: (courseTitle: string) => `你是「墨痕」AI 陪学助手，正在陪用户阅读课件《${courseTitle}》。`,
+    systemWithTools:
+      '你可以调用只读工具浏览、检索这份课件来回答问题；工具使用要克制：本节上下文已够就直接回答，需要跨节/跨文件信息时先 search_course 再 read_course_file 精读。',
+    systemNoTools: '请基于用户提供的上下文与通识回答。',
+    systemSection: (sectionTitle: string) => `用户当前正在阅读小节：${sectionTitle}。`,
+    systemRules:
+      '回答要求：中文 Markdown，先给结论再展开；引用课件内容时注明来源文件名；课件里没有的用通识补充并注明「课件外补充」。不要寒暄。',
+    roundLimit: '请停止调用工具，立刻根据已掌握的信息给出最终回答。',
+
+    toolList: '列出当前课件内的全部文件路径（含目录 INDEX.md），用于了解课程结构',
+    toolRead: '读取课件内某个文件的全文（超长会截断）。路径来自 list_course_files',
+    toolReadPath: '文件相对路径，如 lesson01.md',
+    toolSearch: '在课件全部文件中检索关键词，返回命中文件、行号与该行内容。跨节/跨文件找信息时优先用它',
+    toolSearchKeyword: '要检索的关键词',
+
+    charCount: (n: number) => (n < 1000 ? `${n} 字` : `${(n / 1000).toFixed(1)}k 字`),
+
+    listed: (n: number) => `浏览目录 · ${n} 个文件`,
+    listedResult: (n: number) => `${n} 个文件：`,
+    readNoPath: '读取 · 缺少文件路径',
+    readNoPathResult: '错误：缺少 path 参数',
+    readEmpty: (path: string) => `读取 ${path} · 无内容`,
+    readEmptyResult: (path: string) => `文件 ${path} 不存在或为空`,
+    read: (path: string, size: string) => `读取 ${path} · ${size}`,
+    readTruncated: (total: number) => `…（已截断，全文 ${total} 字符）`,
+    searchNoKeyword: '检索 · 缺少关键词',
+    searchNoKeywordResult: '错误：缺少 keyword 参数',
+    search: (keyword: string, hits: number) => `检索「${keyword}」 · ${hits} 处命中`,
+    searchHead: (hits: number, scanned: number | null) =>
+      scanned === null ? `共命中 ${hits} 处` : `共命中 ${hits} 处（扫描在 ${scanned} 个文件后提前停止）`,
+    searchFound: (head: string, lines: string) => `${head}：\n${lines}`,
+    searchEmpty: (head: string) => `${head}：无`,
+
+    running: (tool: string) => `调用 ${tool}…`,
+    failed: (tool: string) => `调用 ${tool} 失败`,
+    execFailed: (msg: string) => `工具执行失败：${msg}`,
+    unknownTool: (tool: string) => `未知工具 ${tool}`,
+    unknownToolResult: (tool: string) => `未知工具：${tool}`,
+  },
+
+  /** The annotation card that pops up when a highlight is tapped. */
+  annot: {
+    label: '划词标注',
+    dragHint: '按住可拖动',
+    close: '关闭',
+    aiAnswer: 'A I 解 答',
+    continueAsk: '在面板里继续追问',
+    noThread: '这条标注还没有问答。划词浮出的「问」印会顺带存下对话。',
+    noteTitle: '我 的 笔 记',
+    noteSaved: '✓ 已保存',
+    notePlaceholder: '写下你的批注（失焦即保存）…',
+    style: '样式',
+    styleHighlight: '高亮',
+    styleUnderline: '下划线',
+    confirmDelete: '删除这条标注？（笔记与标注一并删除，问答历史保留）',
+    delete: '删除标注',
+  },
+
+  /** The per-book highlights-and-Q&A drawer. */
+  askHistory: {
+    drawerLabel: '问答与标注',
+    title: '问 答 与 标 注',
+    count: (threads: number, annotations: number) => `共 ${threads} 段问答 · ${annotations} 条标注（随书自动保存）`,
+    close: '收起历史',
+    loading: '读取中……',
+    empty: '还没有记录。在正文里划选一段内容，点浮出的「问」印——那段划词会变成一条标注，问答也一并存下来，随时可以回来查看、续问或删除。',
+    markSection: '划 词 标 注',
+    openMark: '在正文中打开这条标注',
+    jump: '定位',
+    jumpHint: '跳到这一节',
+    threadSection: '问 答 历 史',
+    reopen: '在面板里重新打开这段对话',
+    freeAsk: '自由问答',
+    noSection: '未定位小节',
+    confirmDelete: '删除这段问答？',
+    confirmClear: (n: number) => `清空本书全部 ${n} 段问答？标注与笔记会保留。`,
+    clear: '清空本书问答',
+    footer: '记录只存本机；导出 zip 时会连同标注一起打包，导入同一本书即可复原。',
+  },
+
+  /** The two seal buttons that float next to a text selection. */
+  toolbar: {
+    ask: '问',
+    askHint: '就这段问 AI（对话会连标注一起存下来）',
+    askLabel: '问 AI',
+    mark: '标',
+    markHint: '高亮并记笔记（不上 AI）',
+    markLabel: '标注并记笔记',
+  },
+
+  /**
    * Everything `describeAIError` can say. These surface in Settings and in the
    * AI panel, so they are user-facing even though they live in the network layer.
    */

@@ -164,6 +164,161 @@ export const en: Dict = {
     undo: 'Undo',
   },
 
+  ask: {
+    title: 'Ask AI',
+    history: 'History',
+    historyHint: 'Highlights and Q&A for this book (slides in from the left)',
+    close: 'Close the panel',
+
+    setupTitle: 'Connect an AI first',
+    setupBody:
+      'Enter your API base URL and key to start asking (OpenAI-compatible endpoints and Anthropic both work; the key stays in this browser).',
+    setupAction: 'Open Settings',
+    intro: (canEdit: boolean) =>
+      'Ask, and I will read through this course and search it as needed before answering — the workflow block shows what I looked at. You can keep asking follow-ups. ' +
+      'Select a passage in the text and tap the “A” seal to bring its context along.' +
+      (canEdit ? ' Switch to “Rewrite lesson” to have AI edit the current lesson directly.' : ''),
+
+    flowTitle: 'WORKFLOW',
+    stepDetail: 'Details',
+    stepCollapse: 'Hide',
+    thinking: 'Putting the answer together…',
+
+    apply: 'Apply to this lesson',
+    applied: '✓ Applied to this lesson',
+    applyHint: 'Apply once you are happy; otherwise keep refining',
+
+    modeAsk: 'Ask AI',
+    modeEdit: 'Rewrite lesson',
+    includeSection: 'Attach the full lesson',
+
+    placeholderEdit: 'Describe the change, e.g. tighten this lesson / add an example / make the exercises harder…',
+    placeholderAsk: 'Ask anything — I will read through this course as needed',
+    hintEdit: 'The result can be applied back to this lesson',
+    hintTouch: 'Enter inserts a newline · tap Send to submit',
+    hintDesktop: 'Enter to send · Shift+Enter for a newline',
+    stop: '■ Stop',
+    send: 'Send ↵',
+
+    saved: 'Saved',
+    notConfigured: 'No AI configured yet — fill in the base URL and API key first.',
+    sectionNotLoaded: 'This lesson has not loaded yet, so it cannot be rewritten.',
+    rewriteLabel: (instruction: string) => `Rewrite: ${instruction}`,
+
+    system:
+      'You are the course editor inside Atramentum, an AI study companion. The user gives you the current body of a lesson plus a change request; rewrite it accordingly. ' +
+      'Output only the rewritten Markdown body (from the H1 title to the end) and keep the original structure (H1 → blockquote objective → --- sections → self-check exercises). ' +
+      'Wrap code blocks and ASCII diagrams in unlabelled ``` fences; no explanation, and do not wrap the whole document in a code fence.',
+
+    payload: {
+      course: 'Course',
+      section: 'Section',
+      before: 'Preceding text',
+      after: 'Following text',
+      selection: 'User selection',
+      reading: 'Currently reading',
+      sectionFull: 'Full lesson text',
+      question: 'Question',
+      currentText: 'Current body',
+      editRequest: 'Requested change',
+      explainSelection: 'Explain the selected passage.',
+      outputRewrite: 'Output the complete rewritten body.',
+    },
+  },
+
+  agent: {
+    systemIntro: (courseTitle: string) =>
+      `You are the study companion inside Atramentum, reading the course “${courseTitle}” alongside the user.`,
+    systemWithTools:
+      'You may call read-only tools to browse and search this course. Use them sparingly: if the current lesson already gives you enough, just answer; when the answer spans lessons or files, search_course first and then read_course_file for the details.',
+    systemNoTools: 'Answer from the context the user provided plus general knowledge.',
+    systemSection: (sectionTitle: string) => `The user is currently reading the lesson: ${sectionTitle}.`,
+    systemRules:
+      'Answer in Markdown: conclusion first, then the reasoning. Cite the source file name when you quote course material. Fill gaps from general knowledge and label them as “outside the course”. Skip the pleasantries.',
+    roundLimit: 'Stop calling tools and give your final answer now, based on what you already have.',
+
+    toolList: 'List every file path in the current course (including INDEX.md), to understand its structure',
+    toolRead: 'Read the full text of one file in the course (truncated if very long). Paths come from list_course_files',
+    toolReadPath: 'File path relative to the course, e.g. lesson01.md',
+    toolSearch: 'Search every file in the course for a keyword, returning the file, line number and line content. Prefer this when hunting across lessons or files',
+    toolSearchKeyword: 'The keyword to search for',
+
+    charCount: (n: number) => (n < 1000 ? `${n} chars` : `${(n / 1000).toFixed(1)}k chars`),
+
+    listed: (n: number) => `Browsed the index · ${n} file${n === 1 ? '' : 's'}`,
+    listedResult: (n: number) => `${n} file${n === 1 ? '' : 's'}:`,
+    readNoPath: 'Read · no file path given',
+    readNoPathResult: 'Error: the path argument is missing',
+    readEmpty: (path: string) => `Read ${path} · empty`,
+    readEmptyResult: (path: string) => `File ${path} does not exist or is empty`,
+    read: (path: string, size: string) => `Read ${path} · ${size}`,
+    readTruncated: (total: number) => `…(truncated; the full text is ${total} characters)`,
+    searchNoKeyword: 'Search · no keyword given',
+    searchNoKeywordResult: 'Error: the keyword argument is missing',
+    search: (keyword: string, hits: number) => `Searched “${keyword}” · ${hits} match${hits === 1 ? '' : 'es'}`,
+    searchHead: (hits: number, scanned: number | null) =>
+      scanned === null
+        ? `Found ${hits} match${hits === 1 ? '' : 'es'}`
+        : `Found ${hits} match${hits === 1 ? '' : 'es'} (stopped scanning after ${scanned} files)`,
+    searchFound: (head: string, lines: string) => `${head}:\n${lines}`,
+    searchEmpty: (head: string) => `${head}: none`,
+
+    running: (tool: string) => `Calling ${tool}…`,
+    failed: (tool: string) => `Calling ${tool} failed`,
+    execFailed: (msg: string) => `The tool failed: ${msg}`,
+    unknownTool: (tool: string) => `Unknown tool ${tool}`,
+    unknownToolResult: (tool: string) => `Unknown tool: ${tool}`,
+  },
+
+  annot: {
+    label: 'Highlight',
+    dragHint: 'Press and drag to move',
+    close: 'Close',
+    aiAnswer: 'ANSWER',
+    continueAsk: 'Keep asking in the panel',
+    noThread: 'No Q&A on this highlight yet. The “A” seal that pops up on selection saves the conversation along with it.',
+    noteTitle: 'MY NOTE',
+    noteSaved: '✓ Saved',
+    notePlaceholder: 'Write your note (saved when the field loses focus)…',
+    style: 'Style',
+    styleHighlight: 'Highlight',
+    styleUnderline: 'Underline',
+    confirmDelete: 'Delete this highlight? The note goes with it; the Q&A history is kept.',
+    delete: 'Delete',
+  },
+
+  askHistory: {
+    drawerLabel: 'Q&A and highlights',
+    title: 'Q&A AND HIGHLIGHTS',
+    count: (threads: number, annotations: number) =>
+      `${threads} conversation${threads === 1 ? '' : 's'} · ${annotations} highlight${annotations === 1 ? '' : 's'} (saved with the book)`,
+    close: 'Close history',
+    loading: 'Reading…',
+    empty:
+      'Nothing recorded yet. Select a passage in the text and tap the “A” seal that pops up — the selection becomes a highlight, the conversation is saved alongside it, and you can come back to read, continue or delete it at any time.',
+    markSection: 'HIGHLIGHTS',
+    openMark: 'Open this highlight in the text',
+    jump: 'Go',
+    jumpHint: 'Jump to this lesson',
+    threadSection: 'Q&A HISTORY',
+    reopen: 'Reopen this conversation in the panel',
+    freeAsk: 'Free-form question',
+    noSection: 'No lesson',
+    confirmDelete: 'Delete this conversation?',
+    confirmClear: (n: number) => `Clear all ${n} conversation${n === 1 ? '' : 's'} for this book? Highlights and notes are kept.`,
+    clear: 'Clear this book’s Q&A',
+    footer: 'Records live on this device only. Exporting a zip packs them together with your highlights — import the same book to restore them.',
+  },
+
+  toolbar: {
+    ask: 'A',
+    askHint: 'Ask AI about this passage (saves the conversation with the highlight)',
+    askLabel: 'Ask AI',
+    mark: 'M',
+    markHint: 'Highlight and take a note (no AI)',
+    markLabel: 'Highlight and take a note',
+  },
+
   aiError: {
     stopped: 'Stopped',
     connectTimeout: (sec: number) =>
