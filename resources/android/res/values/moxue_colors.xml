@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 名字都带 moxue_ 前缀，免得和模板自带的 ic_launcher_background 撞上 -->
+    <color name="moxue_launcher_background">#C03F2B</color>
+    <color name="moxue_splash_background">#F5F1E8</color>
+</resources>

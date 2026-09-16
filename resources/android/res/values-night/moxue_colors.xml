@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 只覆盖需要变的那个；launcher_background 没列在这儿，会回退到 values/ -->
+    <color name="moxue_splash_background">#101518</color>
+</resources>

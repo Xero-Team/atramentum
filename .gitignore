@@ -8,5 +8,7 @@ D:/project/study
 # Capacitor 的原生工程是生成物（npx cap add android），不入库：
 # 图标、应用名之类的定制一律走 capacitor.config.ts 与脚本，别手工改 android/，
 # 否则 CI 里重新生成一次就丢。见 README「打包成 Android APK」。
-android/
-ios/
+# 注意必须写成 /android/：不带前导斜杠会匹配任意层级的 android 目录，
+# 把 resources/android/ 也一起忽略掉。
+/android/
+/ios/
