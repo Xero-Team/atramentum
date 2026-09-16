@@ -67,6 +67,29 @@ jobs:
           echo "--- 已发现的插件 ---"
           npx cap ls android || true
 
+      # 图标与启动画面是本地光栅化好提交在 resources/android/res 下的：
+      # 构建机上没有 Chrome，不能现生成。见 scripts/make-icons.mjs
+      - name: 换上墨痕的图标与启动画面
+        run: |
+          RES=android/app/src/main/res
+          # 模板自带的启动底是 Capacitor logo 的 PNG，与我们的 splash.xml 同名，
+          # 留着会报资源重复
+          rm -f $RES/drawable*/splash.png
+          cp -r resources/android/res/. $RES/
+
+          # Android 12+ 的启动画面走系统 SplashScreen API，背景色得从主题里给。
+          # 模板的 styles.xml 是生成物，只能打补丁；锚点找不到就报错退出，
+          # 免得 Capacitor 换模板之后这里静默失效
+          STYLES=$RES/values/styles.xml
+          grep -q 'AppTheme.NoActionBarLaunch' "$STYLES" || { echo "::error::模板 styles.xml 结构变了，启动画面补丁需要更新"; exit 1; }
+          sed -i 's#<item name="android:background">@drawable/splash</item>#&\n        <item name="windowSplashScreenBackground">@color/moxue_splash_background</item>#' "$STYLES"
+          grep -q 'windowSplashScreenBackground' "$STYLES" || { echo "::error::启动画面补丁没打上"; exit 1; }
+
+          echo "--- 关键资源确认 ---"
+          ls $RES/mipmap-anydpi-v26/
+          ls $RES/drawable/ | head
+          grep -c moxue_ $RES/values/moxue_colors.xml
+
       - name: 构建 debug APK
         working-directory: android
         run: |
