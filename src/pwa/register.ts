@@ -7,6 +7,7 @@
  * 更新流程刻意做成「先问再换」：新 SW 装好会停在 waiting，等页面弹提示、
  * 用户点了才 skipWaiting 接管。否则正在读的书会被新版本资源抽掉。
  */
+import { isNative } from '../platform'
 
 export type UpdateHandler = () => void
 
@@ -68,6 +69,9 @@ async function setup(): Promise<void> {
 }
 
 export function registerServiceWorker(): void {
+  // 原生壳里资源已经在 APK 里了，SW 没有意义；而且它和 Capacitor 的
+  // WebViewAssetLoader 配合有坑（拦截的是 https://localhost 的自定义协议）
+  if (isNative) return
   if (!import.meta.env.PROD) return
   if (!('serviceWorker' in navigator)) return
   window.addEventListener('load', () => {

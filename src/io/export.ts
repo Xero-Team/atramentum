@@ -2,6 +2,7 @@
 import { strToU8, zipSync } from 'fflate'
 import type { CourseMeta } from '../types/course'
 import { storeFor } from '../course'
+import { isNative } from '../platform'
 import { NOTES_FILE } from './notes'
 import { notesForExport } from './notesDb'
 
@@ -15,6 +16,42 @@ function downloadBlob(blob: Blob, filename: string): void {
   a.remove()
   // Safari 需等点击完成后再回收
   setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+/** ArrayBuffer → base64（分块拼，避免 String.fromCharCode 参数过多爆栈） */
+async function blobToBase64(blob: Blob): Promise<string> {
+  const bytes = new Uint8Array(await blob.arrayBuffer())
+  const CHUNK = 0x8000
+  let bin = ''
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
+  }
+  return btoa(bin)
+}
+
+/**
+ * 把 zip 交出去。
+ *
+ * 原生壳里 `<a download>` 是不会触发下载的（WebView 没有浏览器的下载管理器），
+ * 得先写进应用缓存目录，再交给系统分享面板——用户可以存到「文件」、发给别人，
+ * 或转存到网盘。目录必须是 Directory.Cache：Capacitor 的 Share 走 FileProvider，
+ * 只认 cache / files 这两个目录下的文件。
+ */
+async function saveBlob(blob: Blob, filename: string): Promise<void> {
+  if (!isNative) {
+    downloadBlob(blob, filename)
+    return
+  }
+  const [{ Filesystem, Directory }, { Share }] = await Promise.all([
+    import('@capacitor/filesystem'),
+    import('@capacitor/share'),
+  ])
+  const { uri } = await Filesystem.writeFile({
+    path: filename,
+    data: await blobToBase64(blob),
+    directory: Directory.Cache,
+  })
+  await Share.share({ title: filename, url: uri, dialogTitle: '导出课件' })
 }
 
 export interface ExportResult {
@@ -51,6 +88,6 @@ export async function exportCourseZip(meta: CourseMeta): Promise<ExportResult> {
   }
   const blob = new Blob([zipSync(files)], { type: 'application/zip' })
   const safeName = meta.title.replace(/[\\/:*?"<>|]/g, '_') || 'course'
-  downloadBlob(blob, `${safeName}.zip`)
+  await saveBlob(blob, `${safeName}.zip`)
   return { missing, notes }
 }
