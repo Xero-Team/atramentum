@@ -153,7 +153,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: android-latest
-          name: 墨痕 / Atramentum Android · rolling build
+          name: Atramentum Android · rolling build
           body: |
             Updated automatically on every `main` build — download and install.
 
@@ -168,15 +168,5 @@ jobs:
 
             - Commit: `${{ github.sha }}`
             - Build: `${{ github.run_number }}`
-
-            ---
-
-            每次 `main` 构建自动更新到这里，直接下载安装即可。
-
-            这是 **debug 签名**的包——自己装、发给朋友都没问题；上架 Google Play
-            需要自备 release keystore（放仓库 secrets）。
-
-            覆盖安装失败（提示「应用未安装」）通常意味着签名变了，先卸载旧的再装
-            （会清掉本地数据，重要内容记得先在应用内「导出 zip」）。
           files: moxue-android.apk
           fail_on_unmatched_files: true
