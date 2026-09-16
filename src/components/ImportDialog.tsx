@@ -127,9 +127,13 @@ export function ImportDialog({ onClose, onImported }: { onClose: () => void; onI
         onDragLeave={() => setDragOver(false)}
         onDrop={onDrop}
       >
-        <div className="flex items-center justify-between border-b border-ink/15 px-5 py-3">
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-ink/15 bg-paper px-5 py-3">
           <h2 className="font-song text-base font-bold tracking-wide">导入</h2>
-          <button className="text-ink-faint transition hover:text-cinnabar" onClick={onClose} aria-label="关闭">
+          <button
+            className="-my-2 -mr-2 p-2 text-ink-faint transition hover:text-cinnabar"
+            onClick={onClose}
+            aria-label="关闭"
+          >
             ✕
           </button>
         </div>
@@ -146,7 +150,7 @@ export function ImportDialog({ onClose, onImported }: { onClose: () => void; onI
             />
           </div>
           <div>
-            <label className="mb-1 block text-sm font-semibold">归入分类（可稍后在书架拖拽调整）</label>
+            <label className="mb-1 block text-sm font-semibold">归入分类（可稍后在书架用卡片上的分类下拉调整）</label>
             <select className={inputCls} value={category} onChange={(e) => setCategory(e.target.value)}>
               <option value="">{UNCATEGORIZED}</option>
               {categories.map((c) => (
@@ -158,26 +162,28 @@ export function ImportDialog({ onClose, onImported }: { onClose: () => void; onI
           </div>
 
           <div
-            className={`border border-dashed px-6 py-8 text-center transition ${
+            className={`border border-dashed px-4 py-6 text-center transition sm:px-6 sm:py-8 ${
               dragOver ? 'border-cinnabar bg-cinnabar/5' : 'border-ink/30'
             }`}
           >
-            <p className="font-song text-lg font-bold text-ink">拖入文件到此</p>
+            <p className="font-song text-lg font-bold text-ink">拖入文件 · 或点击选择</p>
             <p className="mt-2 text-xs leading-6 text-ink-faint">
               课件：整门课的压缩包（zip / tar.gz / rar）或课件文件夹。
               <br />
-              书籍：PDF / EPUB（自动按章节分页，纯阅读，不带划词问 AI）。
+              书籍：PDF / EPUB（自动按章节分页，纯阅读，同样可划词标注）。
+              <br />
+              手机上「选择文件夹」多半不可用，请改用 zip 压缩包。
             </p>
-            <div className="mt-4 flex items-center justify-center gap-3">
+            <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
               <button
-                className="bg-cinnabar px-4 py-1.5 text-sm text-paper transition hover:bg-cinnabar-deep disabled:opacity-50"
+                className="bg-cinnabar px-4 py-2 text-sm text-paper transition hover:bg-cinnabar-deep disabled:opacity-50 md:py-1.5"
                 onClick={() => zipInputRef.current?.click()}
                 disabled={busy}
               >
                 选择文件
               </button>
               <button
-                className="border border-ink/25 px-4 py-1.5 text-sm text-ink-soft transition hover:border-cinnabar/50 hover:text-cinnabar-deep disabled:opacity-50"
+                className="border border-ink/25 px-4 py-2 text-sm text-ink-soft transition hover:border-cinnabar/50 hover:text-cinnabar-deep disabled:opacity-50 md:py-1.5"
                 onClick={() => dirInputRef.current?.click()}
                 disabled={busy}
               >

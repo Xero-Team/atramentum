@@ -10,6 +10,9 @@ import { Overlay } from './common/Overlay'
 const inputCls =
   'w-full border border-ink/20 bg-paper px-2.5 py-1.5 text-sm text-ink outline-none transition focus:border-cinnabar'
 
+/** 小按钮统一补一点纵向内边距：桌面 28px、触屏 32px，够手指点 */
+const miniBtn = 'shrink-0 border border-ink/20 px-2.5 py-1.5 text-xs leading-4 text-ink-soft transition hover:border-cinnabar/50 hover:text-cinnabar-deep md:py-1'
+
 const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
   { value: 'light', label: '浅色' },
   { value: 'dark', label: '深色' },
@@ -99,14 +102,19 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
 
   return (
     <Overlay onClose={onClose} closeOnOverlay={false}>
-      <div className="flex items-center justify-between border-b border-ink/15 px-5 py-3">
+      <div className="sticky top-0 z-10 flex items-center justify-between border-b border-ink/15 bg-paper px-5 py-3">
         <h2 className="font-song text-base font-bold tracking-wide">设置</h2>
-        <button className="text-ink-faint transition hover:text-cinnabar" onClick={onClose} aria-label="关闭">
+        <button
+          className="-my-2 -mr-2 p-2 text-ink-faint transition hover:text-cinnabar"
+          onClick={onClose}
+          aria-label="关闭"
+        >
           ✕
         </button>
       </div>
 
-      <div className="max-h-[70vh] space-y-5 overflow-y-auto p-5">
+      {/* 滚动交给 Overlay 的面板，这里不再套一层，免得手机上出现双滚动条 */}
+      <div className="space-y-5 p-5">
         <section>
           <h3 className="mb-2 text-sm font-semibold text-ink">外观</h3>
           <div className="flex gap-2">
@@ -166,28 +174,22 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
 
         <section>
           <h3 className="mb-2 text-sm font-semibold text-ink">API Key</h3>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <input
-              className={inputCls}
+              className={`${inputCls} min-w-0 flex-1 basis-48`}
               type={showKey ? 'text' : 'password'}
               placeholder="sk-..."
               value={ai.apiKey}
               onChange={(e) => setAIConfig({ apiKey: e.target.value.trim() })}
               spellCheck={false}
+              autoCapitalize="off"
+              autoCorrect="off"
             />
-            <button
-              className="shrink-0 border border-ink/20 px-2.5 text-xs text-ink-soft transition hover:border-cinnabar/50 hover:text-cinnabar-deep"
-              onClick={() => setShowKey((v) => !v)}
-            >
+            <button className={miniBtn} onClick={() => setShowKey((v) => !v)}>
               {showKey ? '隐藏' : '显示'}
             </button>
             {preset && (
-              <a
-                className="shrink-0 border border-ink/20 px-2.5 text-xs leading-8 text-ink-soft transition hover:border-cinnabar/50 hover:text-cinnabar-deep"
-                href={preset.apiKeyURL}
-                target="_blank"
-                rel="noreferrer noopener"
-              >
+              <a className={miniBtn} href={preset.apiKeyURL} target="_blank" rel="noreferrer noopener">
                 获取密钥
               </a>
             )}
@@ -196,11 +198,11 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
 
         <section>
           <h3 className="mb-2 text-sm font-semibold text-ink">模型</h3>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             {/* 自定义下拉：原生 datalist 在 Chrome 里点输入框不弹层、且按已填值过滤常导致空列表，不可控 */}
             <div
               ref={modelWrapRef}
-              className="relative flex-1"
+              className="relative min-w-0 flex-1 basis-48"
               onKeyDown={(e) => {
                 // Esc 只收起下拉，不再让 Overlay 把整个设置关掉
                 if (e.key === 'Escape' && modelOpen) {
@@ -225,7 +227,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                   aria-label="展开模型列表"
                   aria-expanded={modelOpen}
                   tabIndex={-1}
-                  className="absolute right-1.5 top-1/2 -translate-y-1/2 px-1 text-xs text-ink-faint transition hover:text-cinnabar"
+                  className="absolute right-1 top-1/2 -translate-y-1/2 px-2 py-1.5 text-xs text-ink-faint transition hover:text-cinnabar"
                   onClick={() => setModelOpen((v) => !v)}
                 >
                   ▾
@@ -234,13 +236,13 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
               {modelOpen && modelOptions.length > 0 && (
                 <ul
                   role="listbox"
-                  className="absolute left-0 right-0 top-full z-10 mt-1 max-h-60 overflow-y-auto border border-ink/20 bg-paper py-1 shadow-paper"
+                  className="absolute left-0 right-0 top-full z-10 mt-1 max-h-60 overflow-y-auto overscroll-contain border border-ink/20 bg-paper py-1 shadow-paper"
                 >
                   {modelOptions.map((m) => (
                     <li key={m} role="option" aria-selected={m === ai.model}>
                       <button
                         type="button"
-                        className={`block w-full px-2.5 py-1.5 text-left text-sm transition hover:bg-ink/5 ${
+                        className={`block w-full px-2.5 py-2 text-left text-sm transition hover:bg-ink/5 md:py-1.5 ${
                           m === ai.model ? 'text-cinnabar-deep' : 'text-ink'
                         }`}
                         onClick={() => {
@@ -256,7 +258,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
               )}
             </div>
             <button
-              className="shrink-0 border border-ink/20 px-2.5 text-xs text-ink-soft transition hover:border-cinnabar/50 hover:text-cinnabar-deep disabled:opacity-50"
+              className={`${miniBtn} disabled:opacity-50`}
               onClick={fetchModels}
               disabled={fetching}
             >
@@ -267,9 +269,9 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
         </section>
 
         <section className="border-t border-ink/10 pt-4">
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <button
-              className="bg-cinnabar px-4 py-1.5 text-sm text-paper transition hover:bg-cinnabar-deep disabled:opacity-50"
+              className="bg-cinnabar px-4 py-2 text-sm text-paper transition hover:bg-cinnabar-deep disabled:opacity-50 md:py-1.5"
               onClick={testConnection}
               disabled={testing || !ai.baseURL || !ai.model}
             >

@@ -125,6 +125,39 @@
   text-underline-offset: 3px;
 }
 
+/* ── 小屏排印 ──
+   窄屏上 28px 的标题和 24px 的多级列表缩进会把正文挤没，这里整体收一档；
+   同时让代码块 / 表格「出血」到页面留白里，把可读宽度还给内容。 */
+@media (max-width: 640px) {
+  .prose {
+    @apply text-[16px] leading-[1.9];
+  }
+  .prose h1 {
+    @apply mb-5 pb-3 text-[22px] tracking-normal;
+  }
+  .prose h2 {
+    @apply mt-8 mb-3 border-l-[3px] pl-2.5 text-[19px];
+  }
+  .prose h3 {
+    @apply mt-6 mb-2 text-[17px];
+  }
+  .prose h4 {
+    @apply text-[15px];
+  }
+  .prose ul,
+  .prose ol {
+    @apply pl-5;
+  }
+  .prose pre.code,
+  .prose pre.ascii,
+  .prose .table-wrap {
+    @apply -mx-2 rounded-sm;
+  }
+  .prose pre.code {
+    @apply p-3;
+  }
+}
+
 /* highlight.js 主题（暗底代码块用的最小子集，自绘）。
    代码块深浅两色都是暗底，所以两套配色都得是「暗底上的亮字」；
    深色主题换成水墨调：青作关键字、其余压成青灰，免得暖色块在墨色页面上跳出来。

@@ -634,12 +634,12 @@ export function NewCourseDialog() {
 
   return (
     <Overlay onClose={phase === 'generating' ? minimize : close} closeOnOverlay={phase !== 'generating'}>
-      <div className="flex items-center justify-between border-b border-ink/15 px-5 py-3">
+      <div className="sticky top-0 z-10 flex items-center justify-between border-b border-ink/15 bg-paper px-5 py-3">
         <h2 className="font-song text-base font-bold tracking-wide">AI 著书</h2>
         <div className="flex items-center gap-2">
           {phase === 'generating' && (
             <button
-              className="border border-ink/20 px-2 py-0.5 text-xs text-ink-faint transition hover:border-cinnabar/50 hover:text-cinnabar"
+              className="border border-ink/20 px-2.5 py-2 text-xs text-ink-faint transition hover:border-cinnabar/50 hover:text-cinnabar md:py-0.5"
               onClick={minimize}
               title="收起对话框，生成在后台继续；可随时去书架/阅读器预览已写完的课时"
             >
@@ -647,7 +647,11 @@ export function NewCourseDialog() {
             </button>
           )}
           {phase !== 'generating' && (
-            <button className="text-ink-faint transition hover:text-cinnabar" onClick={close} aria-label="关闭">
+            <button
+              className="-my-2 -mr-2 p-2 text-ink-faint transition hover:text-cinnabar"
+              onClick={close}
+              aria-label="关闭"
+            >
               ✕
             </button>
           )}
@@ -795,12 +799,15 @@ export function NewCourseDialog() {
           {planErr && (
             <p className="border border-cinnabar/40 bg-cinnabar/5 px-3 py-2 text-xs leading-5 text-cinnabar-deep">{planErr}</p>
           )}
-          <div className="flex items-center justify-end gap-3">
-            <button className="border border-ink/25 px-4 py-1.5 text-sm text-ink-soft transition hover:border-cinnabar/50" onClick={close}>
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            <button
+              className="border border-ink/25 px-4 py-2 text-sm text-ink-soft transition hover:border-cinnabar/50 md:py-1.5"
+              onClick={close}
+            >
               取消
             </button>
             <button
-              className="bg-cinnabar px-4 py-1.5 text-sm text-paper transition hover:bg-cinnabar-deep disabled:opacity-40"
+              className="bg-cinnabar px-4 py-2 text-sm text-paper transition hover:bg-cinnabar-deep disabled:opacity-40 md:py-1.5"
               onClick={() => void doPlan()}
               disabled={!topic.trim() || !ai.apiKey || !ai.model}
             >
@@ -861,15 +868,21 @@ export function NewCourseDialog() {
                   ? `已生成 ${lessons.filter((l) => l.skip).length} / ${lessons.length} 课时。勾「跳过」的沿用已有正文，其余沿规划续写；标题、要点可改，也可加新课时。`
                   : `共 ${lessons.length} 课时。确认后逐课时生成；标题、要点、顺序都可改，也可增删。`}
               </p>
-              <div className={`max-h-[42vh] space-y-3 overflow-y-auto pr-1 ${revising ? 'pointer-events-none opacity-60' : ''}`}>
+              {/* 窄屏不套内层滚动：让课时卡自然撑开、由外层面板统一滚，
+                  否则两层滚动条在手机上很难点到下面那层 */}
+              <div className={`max-h-[42vh] space-y-3 overflow-y-auto overscroll-contain pr-1 max-md:max-h-none max-md:overflow-visible ${revising ? 'pointer-events-none opacity-60' : ''}`}>
                 {lessons.map((l, li) => (
                   <div key={li} className="border border-ink/15 p-3">
-                    <div className="flex items-center gap-2">
-                      <span className="w-8 shrink-0 text-center text-xs text-ink-faint">{li + 1}</span>
-                      <input className={`${inputCls} font-song font-bold`} value={l.title} onChange={(e) => editLesson(li, e.target.value)} />
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="w-6 shrink-0 text-center text-xs text-ink-faint md:w-8">{li + 1}</span>
+                      <input
+                        className={`${inputCls} min-w-0 flex-1 basis-28 font-song font-bold`}
+                        value={l.title}
+                        onChange={(e) => editLesson(li, e.target.value)}
+                      />
                       {continueCourse && (
                         <label
-                          className="flex shrink-0 cursor-pointer select-none items-center gap-1 text-xs text-ink-faint"
+                          className="order-last flex w-full shrink-0 cursor-pointer select-none items-center gap-1.5 py-1 text-xs text-ink-faint md:order-none md:w-auto md:py-0"
                           title="勾选则沿用已有正文，不重新生成"
                         >
                           <input
@@ -881,19 +894,29 @@ export function NewCourseDialog() {
                           跳过
                         </label>
                       )}
-                      <button className="shrink-0 px-1 text-xs text-ink-faint transition hover:text-cinnabar" onClick={() => moveLesson(li, -1)} aria-label="上移">
-                        ↑
-                      </button>
-                      <button className="shrink-0 px-1 text-xs text-ink-faint transition hover:text-cinnabar" onClick={() => moveLesson(li, 1)} aria-label="下移">
-                        ↓
-                      </button>
-                      <button
-                        className="shrink-0 border border-ink/20 px-2 py-1 text-xs text-ink-faint transition hover:border-cinnabar hover:text-cinnabar"
-                        onClick={() => removeLesson(li)}
-                        aria-label="删除本课时"
-                      >
-                        ✕
-                      </button>
+                      <div className="flex shrink-0 items-center gap-0.5">
+                        <button
+                          className="flex h-8 w-8 items-center justify-center text-xs text-ink-faint transition hover:text-cinnabar md:h-6 md:w-6"
+                          onClick={() => moveLesson(li, -1)}
+                          aria-label="上移"
+                        >
+                          ↑
+                        </button>
+                        <button
+                          className="flex h-8 w-8 items-center justify-center text-xs text-ink-faint transition hover:text-cinnabar md:h-6 md:w-6"
+                          onClick={() => moveLesson(li, 1)}
+                          aria-label="下移"
+                        >
+                          ↓
+                        </button>
+                        <button
+                          className="flex h-8 w-8 shrink-0 items-center justify-center border border-ink/20 text-xs text-ink-faint transition hover:border-cinnabar hover:text-cinnabar md:h-6 md:w-6"
+                          onClick={() => removeLesson(li)}
+                          aria-label="删除本课时"
+                        >
+                          ✕
+                        </button>
+                      </div>
                     </div>
                     <textarea
                       className={`${inputCls} mt-2 min-h-16 resize-y text-xs`}
@@ -915,16 +938,19 @@ export function NewCourseDialog() {
                   onChange={(e) => setFeedback(e.target.value)}
                   disabled={revising}
                 />
-                <div className="mt-2 flex items-center gap-3">
+                <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
                   <button
-                    className="border border-ink/20 px-3 py-1.5 text-xs text-ink-soft transition hover:border-cinnabar/50 hover:text-cinnabar-deep disabled:opacity-40"
+                    className="border border-ink/20 px-3 py-2 text-xs text-ink-soft transition hover:border-cinnabar/50 hover:text-cinnabar-deep disabled:opacity-40 md:py-1.5"
                     onClick={() => void doRevise()}
                     disabled={revising || !feedback.trim() || !ai.apiKey || !ai.model}
                   >
                     {revising ? 'AI 修改中…' : '让 AI 修改规划'}
                   </button>
                   {prevLessonsRef.current && !revising && (
-                    <button className="text-xs text-ink-faint transition hover:text-cinnabar" onClick={undoRevise}>
+                    <button
+                      className="-my-1 px-1 py-2 text-xs text-ink-faint transition hover:text-cinnabar"
+                      onClick={undoRevise}
+                    >
                       撤销本次修改
                     </button>
                   )}
@@ -943,15 +969,19 @@ export function NewCourseDialog() {
               </div>
             </>
           )}
-          <div className="mt-3 flex items-center justify-between">
+          <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
             <div className="flex items-center gap-3">
-              <button className="text-xs text-ink-faint transition hover:text-cinnabar disabled:opacity-40" onClick={addLesson} disabled={revising}>
+              <button
+                className="-my-1 px-1 py-2 text-xs text-ink-faint transition hover:text-cinnabar disabled:opacity-40"
+                onClick={addLesson}
+                disabled={revising}
+              >
                 ＋ 加一课时
               </button>
               <label className="flex items-center gap-1.5 text-xs text-ink-faint" title="同时生成几路课时：越高越快，但可能撞供应商限流（429）；1 = 纯串行">
                 并发
                 <select
-                  className="border border-ink/20 bg-paper px-1.5 py-0.5 text-xs text-ink outline-none focus:border-cinnabar"
+                  className="border border-ink/20 bg-paper px-1.5 py-1.5 text-xs text-ink outline-none focus:border-cinnabar md:py-0.5"
                   value={parallel}
                   onChange={(e) => setParallel(Number(e.target.value))}
                   disabled={revising}
@@ -964,16 +994,17 @@ export function NewCourseDialog() {
                 </select>
               </label>
             </div>
-            <div className="flex items-center gap-3">
+            {/* ml-auto 让右边的按钮组换行后仍然贴右 */}
+            <div className="ml-auto flex flex-wrap items-center gap-3">
               <button
-                className="border border-ink/25 px-4 py-1.5 text-sm text-ink-soft transition hover:border-cinnabar/50 disabled:opacity-40"
+                className="border border-ink/25 px-4 py-2 text-sm text-ink-soft transition hover:border-cinnabar/50 disabled:opacity-40 md:py-1.5"
                 onClick={() => setPhase('form')}
                 disabled={revising}
               >
                 上一步
               </button>
               <button
-                className="bg-cinnabar px-4 py-1.5 text-sm text-paper transition hover:bg-cinnabar-deep disabled:opacity-40"
+                className="bg-cinnabar px-4 py-2 text-sm text-paper transition hover:bg-cinnabar-deep disabled:opacity-40 md:py-1.5"
                 onClick={() => {
                   lessonsRef.current = lessons
                   topicRef.current = topic.trim()
@@ -992,17 +1023,18 @@ export function NewCourseDialog() {
       {/* ── 第三步：生成进度 ── */}
       {phase === 'generating' && (
         <div className="p-5">
-          <div className="flex items-baseline justify-between gap-3">
-            <p className="min-w-0 truncate text-sm text-ink-soft">
+          <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-2">
+            <p className="min-w-0 flex-1 truncate text-sm text-ink-soft">
               正在生成：<span className="font-semibold text-ink">{activity}</span>
             </p>
             {createdRef.current && (
               <button
-                className="shrink-0 border border-ink/20 px-2.5 py-1 text-xs text-ink-soft transition hover:border-cinnabar/50 hover:text-cinnabar-deep"
+                className="shrink-0 border border-ink/20 px-2.5 py-1.5 text-xs text-ink-soft transition hover:border-cinnabar/50 hover:text-cinnabar-deep md:py-1"
                 onClick={() => openLesson(0)}
                 title="新标签页打开阅读器；已写完的课时立即可读，未写的显示加载失败属正常"
               >
-                开新标签页预览 ↗
+                <span className="md:hidden">预览 ↗</span>
+                <span className="hidden md:inline">开新标签页预览 ↗</span>
               </button>
             )}
           </div>
@@ -1014,7 +1046,7 @@ export function NewCourseDialog() {
               {live}
             </pre>
           )}
-          <div className="mt-4 max-h-56 space-y-1.5 overflow-y-auto pr-1">
+          <div className="mt-4 max-h-56 space-y-1.5 overflow-y-auto overscroll-contain pr-1">
             {lessonsRef.current.map((l, li) => {
               const st = fileStatus[`l${li}`] ?? 'pending'
               return (
@@ -1025,7 +1057,7 @@ export function NewCourseDialog() {
                   </span>
                   {st === 'done' && createdRef.current && (
                     <button
-                      className="shrink-0 text-xs text-cinnabar-deep underline underline-offset-2 transition hover:text-cinnabar"
+                      className="-my-1 shrink-0 px-1 py-1.5 text-xs text-cinnabar-deep underline underline-offset-2 transition hover:text-cinnabar"
                       onClick={() => openLesson(li)}
                     >
                       去看 ↗
@@ -1038,7 +1070,7 @@ export function NewCourseDialog() {
           {genErr && <p className="mt-3 border border-cinnabar/40 bg-cinnabar/5 px-3 py-2 text-xs text-cinnabar-deep">{genErr}</p>}
           <div className="mt-4 text-right">
             <button
-              className="border border-ink/25 px-4 py-1.5 text-sm text-ink-soft transition hover:border-cinnabar/50 hover:text-cinnabar-deep"
+              className="border border-ink/25 px-4 py-2 text-sm text-ink-soft transition hover:border-cinnabar/50 hover:text-cinnabar-deep md:py-1.5"
               onClick={cancel}
             >
               停止并保留已完成课时
@@ -1058,27 +1090,33 @@ export function NewCourseDialog() {
               : '课件已入库，回到书架即可开读、可导出、可继续让 AI 改写。'}
           </p>
           {Object.values(fileStatus).some((st) => st === 'error') ? (
-            <div className="mt-5 flex items-center justify-center gap-3">
+            <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
               <button
-                className="border border-cinnabar/50 px-5 py-1.5 text-sm text-cinnabar-deep transition hover:bg-cinnabar/5"
+                className="border border-cinnabar/50 px-5 py-2 text-sm text-cinnabar-deep transition hover:bg-cinnabar/5 md:py-1.5"
                 onClick={() => void retryFailed()}
               >
                 重写失败课时
               </button>
               {createdRef.current && (
                 <button
-                  className="border border-ink/20 px-5 py-1.5 text-sm text-ink-soft transition hover:border-cinnabar/50 hover:text-cinnabar-deep"
+                  className="border border-ink/20 px-5 py-2 text-sm text-ink-soft transition hover:border-cinnabar/50 hover:text-cinnabar-deep md:py-1.5"
                   onClick={() => openLesson(0)}
                 >
                   去阅读 ↗
                 </button>
               )}
-              <button className="bg-cinnabar px-5 py-1.5 text-sm text-paper transition hover:bg-cinnabar-deep" onClick={close}>
+              <button
+                className="bg-cinnabar px-5 py-2 text-sm text-paper transition hover:bg-cinnabar-deep md:py-1.5"
+                onClick={close}
+              >
                 {continueCourse ? '完成' : '回书架'}
               </button>
             </div>
           ) : (
-            <button className="mt-5 bg-cinnabar px-5 py-1.5 text-sm text-paper transition hover:bg-cinnabar-deep" onClick={close}>
+            <button
+              className="mt-5 bg-cinnabar px-5 py-2 text-sm text-paper transition hover:bg-cinnabar-deep md:py-1.5"
+              onClick={close}
+            >
               {continueCourse ? '完成' : '回书架'}
             </button>
           )}

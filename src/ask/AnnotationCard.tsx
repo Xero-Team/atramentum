@@ -13,12 +13,19 @@ import { deleteAnnotation, updateAnnotation } from '../course/dbStore'
 import { answerHTML } from './render'
 
 const CARD_W = 340
+/** 窄屏下限：卡片再窄也不能窄过这个，否则笔记框没法用 */
+const CARD_MIN_W = 240
 const GAP = 12
 const EDGE = 8
 
 interface Pos {
   left: number
   top: number
+}
+
+/** 卡片宽度随视口收窄（iPhone SE / 旧安卓只有 320px，硬编码 340 会伸出屏外） */
+function cardWidth(viewportWidth: number): number {
+  return Math.min(CARD_W, Math.max(CARD_MIN_W, viewportWidth - EDGE * 2))
 }
 
 /** 把卡片按视口边界夹住（拖动时用；尺寸取实际渲染值） */
@@ -64,6 +71,19 @@ export function AnnotationCard({
   noteRef.current = note
   const savedNoteRef = useRef(annotation.note)
 
+  // 视口宽度：手机横竖屏切换后卡片要跟着收窄 / 重排，否则会卡在屏外
+  const [vw, setVw] = useState(() => window.innerWidth)
+  useEffect(() => {
+    const onResize = () => setVw(window.innerWidth)
+    window.addEventListener('resize', onResize)
+    window.addEventListener('orientationchange', onResize)
+    return () => {
+      window.removeEventListener('resize', onResize)
+      window.removeEventListener('orientationchange', onResize)
+    }
+  }, [])
+  const cardW = cardWidth(vw)
+
   // 换一条标注才重置草稿；同一条的 note 变化（自己刚存的回流）不打断正在编辑的内容
   useEffect(() => {
     setNote(annotation.note)
@@ -77,14 +97,21 @@ export function AnnotationCard({
   useLayoutEffect(() => {
     if (draggedForRef.current === annotation.id) return
     const el = boxRef.current
-    const w = el?.offsetWidth || CARD_W
+    const w = el?.offsetWidth || cardW
     const h = el?.offsetHeight || 0
     const left = Math.max(EDGE, Math.min(x - w / 2, window.innerWidth - w - EDGE))
     // 默认挂在点击处下方；下沿越界就翻到上方，再不行就贴边（卡片 max-h 由视口兜底）
     let top = y + GAP
     if (h && top + h > window.innerHeight - EDGE) top = y - h - GAP
     setPos(clampPos(left, top, w, h))
-  }, [annotation.id, x, y])
+  }, [annotation.id, x, y, cardW])
+
+  // 转屏 / 改窗口大小：已经摆好位（含被拖过）的卡片按新视口重新夹一遍
+  useLayoutEffect(() => {
+    const el = boxRef.current
+    if (!el) return
+    setPos((p) => (p ? clampPos(p.left, p.top, el.offsetWidth, el.offsetHeight) : p))
+  }, [vw])
 
   /* ── 拖动：抓住标题栏挪（视口内，松手不回弹） ── */
   const dragRef = useRef<{ startX: number; startY: number; from: Pos } | null>(null)
@@ -140,17 +167,17 @@ export function AnnotationCard({
 
   // 点卡片外面关掉（点正文里的标注由阅读器另行处理）
   useEffect(() => {
-    const onDown = (e: MouseEvent) => {
+    const onDown = (e: PointerEvent) => {
       if (boxRef.current?.contains(e.target as Node)) return
-      flushNote(false) // 先存再关：mousedown 触发关闭会立刻卸载本组件
+      flushNote(false) // 先存再关：按下就关闭会立刻卸载本组件
       onClose()
     }
-    document.addEventListener('mousedown', onDown)
-    return () => document.removeEventListener('mousedown', onDown)
+    document.addEventListener('pointerdown', onDown)
+    return () => document.removeEventListener('pointerdown', onDown)
   }, [onClose, flushNote])
 
   // 首帧还没有实测位置：先按点击点粗放一版，避免闪一下左上角
-  const left = pos?.left ?? Math.max(EDGE, Math.min(x - CARD_W / 2, window.innerWidth - CARD_W - EDGE))
+  const left = pos?.left ?? Math.max(EDGE, Math.min(x - cardW / 2, window.innerWidth - cardW - EDGE))
   const top = pos?.top ?? Math.max(EDGE, Math.min(y + GAP, window.innerHeight - 80))
 
   const firstAnswer = useMemo(() => {
@@ -177,8 +204,8 @@ export function AnnotationCard({
   return (
     <div
       ref={boxRef}
-      className="fixed z-40 flex max-h-[calc(100vh-16px)] flex-col border border-ink/20 bg-paper shadow-paper"
-      style={{ left, top, width: CARD_W }}
+      className="max-h-viewport fixed z-40 flex flex-col border border-ink/20 bg-paper shadow-paper"
+      style={{ left, top, width: cardW }}
       role="dialog"
       aria-label="划词标注"
     >
@@ -198,12 +225,16 @@ export function AnnotationCard({
           <p className="text-[11px] tracking-[0.2em] text-ink-faint">划 词 标 注</p>
           {annotation.sectionTitle && <p className="mt-0.5 truncate text-xs text-ink-faint">{annotation.sectionTitle}</p>}
         </div>
-        <button className="shrink-0 text-ink-faint transition hover:text-cinnabar" onClick={onClose} aria-label="关闭">
+        <button
+          className="-my-1 -mr-1 shrink-0 p-1 text-ink-faint transition hover:text-cinnabar"
+          onClick={onClose}
+          aria-label="关闭"
+        >
           ✕
         </button>
       </div>
 
-      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3">
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-3 py-3">
         <p className="border-l-2 border-cinnabar/60 bg-ink/[0.03] px-2.5 py-1.5 font-song text-[13px] leading-6 text-ink">
           {annotation.anchor.text}
         </p>
@@ -215,7 +246,7 @@ export function AnnotationCard({
               <span className="text-[11px] font-semibold tracking-[0.2em] text-ink-faint">A I 解 答</span>
               {thread && (
                 <button
-                  className="text-[11px] text-cinnabar-deep underline underline-offset-2 transition hover:text-cinnabar"
+                  className="-my-1 px-1 py-1 text-[11px] text-cinnabar-deep underline underline-offset-2 transition hover:text-cinnabar"
                   onClick={() => onOpenThread(thread)}
                 >
                   在面板里继续追问
@@ -223,7 +254,7 @@ export function AnnotationCard({
               )}
             </div>
             <div
-              className="prose prose-moxue max-h-56 max-w-none overflow-y-auto border border-ink/10 bg-paper-deep/30 px-2.5 py-2 text-[13px]"
+              className="prose prose-moxue max-h-56 max-w-none overflow-y-auto overscroll-contain border border-ink/10 bg-paper-deep/30 px-2.5 py-2 text-[13px]"
               // 内容经 renderMarkdownSafe 净化后产出（见 render.ts）
               dangerouslySetInnerHTML={{ __html: answerHTML(firstAnswer) }}
             />
@@ -248,7 +279,7 @@ export function AnnotationCard({
         </div>
 
         {/* 样式：高亮 / 下划线 */}
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <span className="text-[11px] text-ink-faint">样式</span>
           {(
             [
@@ -258,7 +289,7 @@ export function AnnotationCard({
           ).map(([key, label]) => (
             <button
               key={key}
-              className={`px-2 py-0.5 text-[11px] transition ${
+              className={`px-2.5 py-1.5 text-[11px] transition md:py-0.5 ${
                 annotation.style === key ? 'bg-ink text-paper' : 'border border-ink/20 text-ink-soft hover:border-cinnabar/50'
               }`}
               onClick={() => setStyle(key)}
@@ -267,7 +298,7 @@ export function AnnotationCard({
             </button>
           ))}
           <button
-            className="ml-auto text-[11px] text-ink-faint transition hover:text-cinnabar"
+            className="ml-auto -my-1 px-1 py-1 text-[11px] text-ink-faint transition hover:text-cinnabar"
             onClick={() => {
               if (!window.confirm('删除这条标注？（笔记与标注一并删除，问答历史保留）')) return
               void deleteAnnotation(annotation.id).then(onChanged)

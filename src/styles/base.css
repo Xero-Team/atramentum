@@ -81,6 +81,18 @@
   }
 }
 
+/* 移动端：文本控件字号不足 16px 时 iOS Safari 会在聚焦瞬间把整页放大。
+   与其用 maximum-scale 关掉缩放（伤可访问性），不如直接把控件字号顶到 16px。
+   注意两点：
+   - <select> 不参与，iOS 对它走原生滚轮选择器，不会触发放大，跟着放大会把卡片撑爆；
+   - 这条规则**故意不放进 @layer**：无层样式优先级高于所有层，否则压不过 text-sm / text-[13px]。 */
+@media (max-width: 640px) {
+  input:not([type='checkbox']):not([type='radio']):not([type='range']),
+  textarea {
+    font-size: 16px;
+  }
+}
+
 @layer components {
   /* 书籍卡片上的操作区（重命名 / 删除 / 分类）。
      桌面端收在右上角、悬停才现；触屏设备没有 hover，一律常显并参与文档流，
@@ -108,7 +120,7 @@
   }
 }
 
-/* 左侧滑出的历史抽屉 */
+/* 左侧滑出的历史/目录抽屉 */
 @keyframes moxue-drawer-in {
   from {
     transform: translateX(-100%);
