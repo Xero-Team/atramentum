@@ -353,6 +353,80 @@ try {
   const enCourses = await evaluate(`(() => [...document.querySelectorAll('a[href*="/c/"]')].map(a => a.textContent.trim()))()`)
   check('and swaps the built-in guide for its English edition',
     enCourses.length === 1 && enCourses[0].includes('Atramentum User Guide'), JSON.stringify(enCourses.map((c) => c.slice(0, 12))))
+
+  // ── Touch ──
+  // Phone-only behaviour, and none of the checks above can see it: the platform's
+  // own selection menu sits on top of ours, and a finger cannot start HTML5
+  // drag-and-drop at all so the shelf needs a gesture of its own. Both broke in the
+  // field while this script stayed green, hence this section.
+  const tap = (x, y, type) =>
+    send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y }] })
+  await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 3, mobile: true })
+  await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 })
+
+  // Back to Chinese, plus one category to drop into (empty categories still render)
+  await evaluate(
+    `localStorage.setItem('moxue-settings', JSON.stringify({ state: { lang: 'zh' }, version: 0 }));
+     localStorage.setItem('moxue-categories', JSON.stringify({ state: { order: ['学习'], assign: {} }, version: 0 }))`,
+  )
+  await send('Page.reload')
+  await waitFor(() => evaluate(`document.readyState === 'complete' && !!document.querySelector('h1')`), { label: 'shelf at phone width' })
+  await sleep(1200)
+
+  const geo = await evaluate(`(() => {
+    const card = document.querySelector('main .grid > div')
+    const block = document.querySelector('[data-drop-category]')
+    if (!card || !block) return null
+    card.scrollIntoView({ block: 'center' })
+    const c = card.getBoundingClientRect()
+    return { card: { x: Math.round(c.x + c.width / 2), y: Math.round(c.y + 24) } }
+  })()`)
+  if (!geo) {
+    check('phone width: a card and a category block are on screen', false)
+  } else {
+    const blockPoint = await evaluate(
+      `(() => { const b = document.querySelector('[data-drop-category]').getBoundingClientRect(); return { x: Math.round(b.x + b.width / 2), y: Math.round(b.y + 24) } })()`,
+    )
+
+    // A plain tap must still open the course — this is what a botched drag guard breaks
+    await tap(geo.card.x, geo.card.y, 'touchStart')
+    await sleep(80)
+    await tap(geo.card.x, geo.card.y, 'touchEnd')
+    await sleep(1000)
+    check('tapping a card opens it', (await evaluate(`location.hash`)).includes('/c/'), await evaluate(`location.hash`))
+
+    await send('Page.navigate', { url: APP })
+    await waitFor(() => evaluate(`document.readyState === 'complete' && !!document.querySelector('h1')`), { label: 'back on the shelf' })
+    await sleep(1000)
+    await evaluate(`document.querySelector('main .grid > div').scrollIntoView({ block: 'center' })`)
+    await sleep(400)
+    const start = await evaluate(
+      `(() => { const c = document.querySelector('main .grid > div').getBoundingClientRect(); return { x: Math.round(c.x + c.width / 2), y: Math.round(c.y + 24) } })()`,
+    )
+
+    await tap(start.x, start.y, 'touchStart')
+    await sleep(600)
+    const lifted = await evaluate(`!!document.querySelector('main .grid > div.opacity-40')`)
+    for (let i = 1; i <= 6; i++) {
+      await tap(
+        Math.round(start.x + ((blockPoint.x - start.x) * i) / 6),
+        Math.round(start.y + ((blockPoint.y - start.y) * i) / 6),
+        'touchMove',
+      )
+      await sleep(60)
+    }
+    const highlighted = await evaluate(
+      `[...document.querySelectorAll('[data-drop-category]')].some(e => e.className.includes('border-cinnabar/60'))`,
+    )
+    await tap(blockPoint.x, blockPoint.y, 'touchEnd')
+    await sleep(500)
+
+    const assign = await evaluate(`Object.values(JSON.parse(localStorage.getItem('moxue-categories')).state.assign)`)
+    check('holding a card lifts it and dropping it on a category files it there',
+      lifted === true && highlighted === true && assign.length === 1 && assign[0] === '学习',
+      `lifted=${lifted} highlighted=${highlighted} assign=${JSON.stringify(assign)}`)
+    check('and the drag does not also open the course', !(await evaluate(`location.hash`)).includes('/c/'))
+  }
 } catch (e) {
   check(`threw: ${e.message}`, false)
 } finally {
