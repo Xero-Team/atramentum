@@ -340,6 +340,19 @@ export const en: Dict = {
     undo: 'Undo',
   },
 
+  course: {
+    manifestFailed: (status: number) => `Could not load manifest.json (${status})`,
+    quotaExceeded: (need: string, free: string) =>
+      `Not enough browser storage: about ${need} needed, about ${free} free`,
+    titleRequired: 'The title cannot be empty',
+    /** Title given to the editable copy a built-in course is forked into */
+    copy: (title: string) => `${title} (copy)`,
+    builtinReadonly: 'Built-in courses are read-only — save a copy first',
+    /** Title for a file whose name is just a number (a PDF page, say) */
+    untitledSection: (n: number) => `Section ${n}`,
+    untitledSkill: 'Untitled skill',
+  },
+
   importDlg: {
     title: 'Import',
     close: 'Close',

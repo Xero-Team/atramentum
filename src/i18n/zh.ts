@@ -337,6 +337,19 @@ export const zh = {
     undo: '撤销',
   },
 
+  /** Messages from the course store layer (Dexie, the built-in manifest, the tree builder). */
+  course: {
+    manifestFailed: (status: number) => `manifest.json 加载失败 (${status})`,
+    quotaExceeded: (need: string, free: string) => `浏览器存储空间不足：需约 ${need}，可用约 ${free}`,
+    titleRequired: '标题不能为空',
+    /** Title given to the editable copy a built-in course is forked into */
+    copy: (title: string) => `${title}（副本）`,
+    builtinReadonly: '内置课件只读，请先另存为副本',
+    /** Title for a file whose name is just a number (a PDF page, say) */
+    untitledSection: (n: number) => `第 ${n} 节`,
+    untitledSkill: '未命名 skill',
+  },
+
   /** The import dialog. */
   importDlg: {
     title: '导入',
