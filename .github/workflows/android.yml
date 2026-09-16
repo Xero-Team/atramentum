@@ -18,7 +18,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       # AGP 8.13 要求 JDK 17 起，用 21
@@ -39,6 +39,9 @@ jobs:
         run: |
           yes | sdkmanager --licenses > /dev/null 2>&1 || true
           sdkmanager "platforms;android-36" "platform-tools"
+          # build-tools 的默认版本跟着 AGP 走，名字写错也不该让这一步挂掉——
+          # 许可已接受，Gradle 自己会补拉缺的组件
+          sdkmanager "build-tools;36.0.0" || echo "build-tools;36.0.0 未装，交给 Gradle 处理"
           echo "--- 已装组件 ---"
           sdkmanager --list_installed | sed -n '1,25p'
 
