@@ -163,8 +163,8 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           )}
           {install === 'manual' && (
             <p className="text-xs leading-6 text-ink-faint">
-              这个浏览器没给出安装入口。可以找找地址栏右侧的安装图标，或浏览器菜单里的「安装应用 / 添加到主屏幕」——
-              书架的引导条关掉后也能从这里重来。
+              这个浏览器当前没给出安装入口。可以找找地址栏的安装图标或菜单里的「安装应用 / 添加到主屏幕」；
+              多数国产套壳浏览器不实现 PWA 安装，换 Chrome / Edge / Safari / 三星浏览器可以装。
             </p>
           )}
         </section>

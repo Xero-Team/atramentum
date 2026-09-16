@@ -42,6 +42,8 @@ export function InstallPrompt() {
   const btn =
     'shrink-0 border border-ink/20 px-2.5 py-1.5 text-xs text-ink-soft transition hover:border-cinnabar/50 hover:text-cinnabar-deep'
 
+  // manual 状态起初写成了「把墨痕装到桌面…」却不给按钮——等于许诺一个不存在的
+  // 动作，用户只会困惑「安装按钮呢」。浏览器没给入口时就得直说没入口。
   return (
     <div className="mt-6 flex flex-wrap items-center gap-x-3 gap-y-2 border border-ink/15 bg-paper-deep/40 px-4 py-3 text-xs leading-6 text-ink-soft">
       <span className="min-w-0 flex-1 basis-48">
@@ -49,6 +51,11 @@ export function InstallPrompt() {
           <>
             在 Safari 点「分享」→「添加到主屏幕」，就能把墨痕当应用打开，
             <span className="text-ink">离线也能翻已读过的书</span>。
+          </>
+        ) : state === 'manual' ? (
+          <>
+            这个浏览器当前没给出安装入口，<span className="text-ink">装不到桌面</span>。
+            想装的话可以找找地址栏的安装图标，或换 Chrome / Edge 打开本页。
           </>
         ) : (
           <>

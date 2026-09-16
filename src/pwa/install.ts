@@ -63,6 +63,17 @@ export function initInstallPrompt(): void {
     deferred = null
     emit()
   })
+
+  // 排查「为什么没看到安装按钮」用：等一会儿还没动静，就是当前浏览器给不出入口。
+  // 多数国产 Chromium 套壳（UC / QQ / 夸克 / 各家自带浏览器）不实现 PWA 安装，
+  // 事件永远不来；真 Chrome 上也可能是此前把安装提示关掉过一次。
+  setTimeout(() => {
+    if (deferred || installed || isStandalone()) return
+    console.info(
+      '[moxue] 未收到 beforeinstallprompt：当前浏览器暂时给不出安装入口，应用内无法触发安装。' +
+        'Chrome / Edge / Safari / 三星浏览器可以装。',
+    )
+  }, 5000)
 }
 
 export function subscribeInstall(fn: () => void): () => void {
