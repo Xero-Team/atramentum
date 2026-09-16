@@ -1,7 +1,11 @@
-// AI 著书对话框（课时制）：意向（主题+需求粘贴+风格 skill）→ 课时规划确认 → 逐课时流式生成 → 入库。
-// 入库时随课程记录保存课时规划骨架（StoredPlan，含标题/要点/需求），供续写恢复完整规划。
-// 续写模式（continueCourse）：优先读该骨架（旧课件回退解析 INDEX.md），只补生成缺失课时后覆盖写回。
-// 整书改写（rewrite + continueCourse）：恢复规划后所有课时按「改写要求」重写并覆盖写回。
+// The Write-with-AI dialog (lesson-based): intent (topic + pasted requirements +
+// style skill) → confirm the lesson plan → stream each lesson → save.
+// The plan skeleton (StoredPlan: titles/points/requirements) is stored with the
+// course record so a continuation can restore the full plan.
+// Continue mode (continueCourse): prefer that skeleton (older courses fall back
+// to parsing INDEX.md), write only the missing lessons, then overwrite.
+// Whole-book rewrite (rewrite + continueCourse): restore the plan and rewrite
+// every lesson against the rewrite instructions, then overwrite.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { listAllCourses, storeFor } from '../course'
 import {
@@ -22,12 +26,13 @@ import { buildIndexMd, genLesson, genPlan, lessonFile, parseIndexEntries, planTe
 import type { PlanLesson } from './pipeline'
 import { emitCourseCreated, emitCourseUpdated, useGenerateStore } from './generateStore'
 import { Overlay } from '../components/common/Overlay'
+import { tr, useI18n } from '../i18n'
 
 type Phase = 'form' | 'plan' | 'generating' | 'done'
 
 type FileStatus = 'pending' | 'running' | 'done' | 'error'
 
-/** 规划清单条目：续写模式下带既有文件名与「跳过」（不重新生成）标记 */
+/** A plan list entry: continue mode adds the existing file name and a "skip" (do not regenerate) flag */
 interface PlanItem extends PlanLesson {
   file?: string
   skip?: boolean
@@ -36,7 +41,7 @@ interface PlanItem extends PlanLesson {
 const inputCls =
   'w-full border border-ink/20 bg-paper px-2.5 py-1.5 text-sm text-ink outline-none transition focus:border-cinnabar'
 
-/** 取参考课材料：INDEX 目录 + 第一节全文 */
+/** Load reference material: the INDEX outline plus the first lesson in full */
 async function loadReference(meta: CourseMeta): Promise<{ outline: string; sample: string }> {
   const store = storeFor(meta.source)
   try {
@@ -53,7 +58,9 @@ async function loadReference(meta: CourseMeta): Promise<{ outline: string; sampl
 }
 
 export function NewCourseDialog() {
-  // 全局承载：生成是长任务，对话框挂在路由之外；最小化不卸载、不中断
+  // Mounted globally: generation is a long job and the dialog lives outside the
+  // router, so minimising keeps it alive instead of unmounting and cancelling.
+  const { t } = useI18n()
   const { visible, minimize, close } = useGenerateStore()
   const continueCourse = useGenerateStore((s) => s.continueCourse)
   const rewrite = useGenerateStore((s) => s.rewrite)
@@ -69,7 +76,7 @@ export function NewCourseDialog() {
   const [topic, setTopic] = useState('')
   const [requirements, setRequirements] = useState('')
 
-  // 风格 skill：默认用内置「墨痕课件风」；'' = 极简骨架；提炼面板状态
+  // Style skill: the built-in "Atramentum course style" by default; '' = bare skeleton. Distil-panel state.
   const [skillId, setSkillId] = useState(DEFAULT_SKILL.id)
   const allSkills = useMemo(() => [DEFAULT_SKILL, ...skills], [skills])
   const skill = allSkills.find((s) => s.id === skillId) ?? null
@@ -84,28 +91,29 @@ export function NewCourseDialog() {
   const [lessons, setLessons] = useState<PlanItem[]>([])
   const [planErr, setPlanErr] = useState('')
 
-  // 大纲沟通：按用户反馈让 AI 修改规划（保留一轮撤销）
+  // Talking the outline over: have the AI revise the plan from feedback (one undo step kept)
   const [feedback, setFeedback] = useState('')
   const [revising, setRevising] = useState(false)
   const [reviseErr, setReviseErr] = useState('')
   const [reviseNote, setReviseNote] = useState('')
   const prevLessonsRef = useRef<PlanItem[] | null>(null)
 
-  // 整书改写：整体改写要求（注入每个课时的重写 prompt）；ref 供生成期闭包读取
+  // Whole-book rewrite: the overall rewrite instructions (injected into every
+  // lesson's prompt); the ref lets the generation closure read it
   const [rewriteNote, setRewriteNote] = useState('')
   const rewriteModeRef = useRef(false)
   const rewriteNoteRef = useRef('')
   rewriteModeRef.current = rewriteMode
   rewriteNoteRef.current = rewriteNote
 
-  // 生成期状态
+  // Generation-time state
   const [fileStatus, setFileStatus] = useState<Record<string, FileStatus>>({})
   const [live, setLive] = useState('')
   const [genErr, setGenErr] = useState('')
   const [doneInfo, setDoneInfo] = useState('')
-  // 当前课时的已用秒数（无输出时用户也能确认请求还活着）
+  // Seconds the current lesson has been running (so the user can tell the request is still alive when nothing is coming out)
   const [elapsed, setElapsed] = useState(0)
-  // 并发路数（1~4；1 = 纯串行）。越高越快，但可能撞供应商限流
+  // How many lessons to write at once (1–4; 1 = strictly serial). Higher is faster but may hit provider rate limits
   const [parallel, setParallel] = useState(2)
   const abortRef = useRef<AbortController | null>(null)
   const filesRef = useRef<Map<string, string>>(new Map())
@@ -114,11 +122,12 @@ export function NewCourseDialog() {
   const topicRef = useRef('')
   const reqRef = useRef('')
   const createdRef = useRef<CourseMeta | null>(null)
-  // 本次会话新建的书（区别于续写的原书）：finalize 一无所出时只允许删这种空壳记录，
-  // 续写目标的原书无论怎样都不能被删除
+  // A book created by this session (as opposed to the target of a continuation):
+  // if finalize produced nothing, only this kind of empty record may be deleted —
+  // the original book a continuation writes into must never be removed
   const freshlyCreatedRef = useRef(false)
 
-  // 「正在生成」从进行中的课时派生（并发生成时可能多个）；须在 lessonsRef 声明之后
+  // "Currently writing" is derived from the lessons in flight (several when running in parallel); must come after lessonsRef is declared
   const activity = useMemo(
     () =>
       lessonsRef.current
@@ -142,7 +151,8 @@ export function NewCourseDialog() {
 
   useEffect(() => () => abortRef.current?.abort(), [])
 
-  // 续写模式：读入已入库课件全部文件，恢复规划骨架；已有正文的课时默认跳过
+  // Continue mode: read every stored file of the course and restore the plan
+  // skeleton; lessons that already have a body default to skipped
   useEffect(() => {
     if (!continueCourse) return
     let alive = true
@@ -153,26 +163,26 @@ export function NewCourseDialog() {
         const text = await store.readFile(continueCourse.id, p)
         if (text !== null) files.set(p, text)
       }
-      // 规划来源：入库时保存的骨架（含要点/需求）优先；旧课件没有则回退解析 INDEX.md 目录表
+      // Source of the plan: the skeleton saved at generation time (with points
+      // and requirements) wins; older courses fall back to parsing the INDEX table
       const entries = parseIndexEntries(files.get('INDEX.md') ?? '')
       const savedPlan =
         continueCourse.source === 'generated' ? await loadCoursePlan(continueCourse.id) : undefined
       const base: PlanLesson[] = savedPlan?.lessons.length
         ? savedPlan.lessons.map((l) => ({ title: l.title, points: l.points ?? [] }))
         : entries.map(({ title }) => ({ title, points: [] }))
-      if (base.length === 0)
-        throw new Error('未找到课时规划骨架或可解析的 INDEX.md 目录表，暂只支持课时制（lessonNN.md）课件')
+      if (base.length === 0) throw new Error(tr().generate.noSkeleton)
       if (!alive) return
       filesRef.current = files
       createdRef.current = continueCourse
-      freshlyCreatedRef.current = false // 续写的原书：绝不删除
+      freshlyCreatedRef.current = false // the original book: never delete it
       topicRef.current = savedPlan?.topic?.trim() || continueCourse.title
       reqRef.current = savedPlan?.requirements ?? ''
       setTopic(topicRef.current)
       setRequirements(reqRef.current)
       lessonsRef.current = base.map((l, i) => {
         const file = entries[i]?.file ?? lessonFile(i)
-        // 整书改写默认全部重写；续写则已有正文的默认跳过
+        // A whole-book rewrite rewrites everything by default; a continuation skips lessons that already have a body
         return { ...l, file, skip: rewriteMode ? false : files.has(file) }
       })
       setLessons(lessonsRef.current)
@@ -184,7 +194,7 @@ export function NewCourseDialog() {
       setPhase('plan')
     })().catch((e) => {
       if (!alive) return
-      setPlanErr(`续写初始化失败：${(e as Error).message}`)
+      setPlanErr(tr().generate.continueInitFailed((e as Error).message))
       setPhase('form')
     })
     return () => {
@@ -196,24 +206,24 @@ export function NewCourseDialog() {
     setFileStatus((prev) => ({ ...prev, [key]: st }))
   }, [])
 
-  /* ── 风格 skill 提炼 ── */
+  /* ── Distilling a style skill ── */
   const doDistill = async () => {
     const ref = courses.find((c) => c.id === distillRefId)
     if (!ref) {
-      setDistillErr('请选择作为风格来源的课件')
+      setDistillErr(t.generate.distillPick)
       return
     }
     setDistilling(true)
     setDistillErr('')
     try {
       const mat = await loadReference(ref)
-      if (!mat.sample && !mat.outline) throw new Error('该课件没有可分析的内容')
+      if (!mat.sample && !mat.outline) throw new Error(t.generate.distillEmpty)
       const guide = await distillSkill(ai, {
         courseTitle: ref.title,
         indexText: mat.outline,
         sampleSection: mat.sample,
       })
-      setDraftName(`${ref.title} 风格`)
+      setDraftName(t.generate.distillName(ref.title))
       setDraftGuide(guide)
       draftSampleRef.current = mat.sample
     } catch (e) {
@@ -236,14 +246,14 @@ export function NewCourseDialog() {
     setDistillOpen(false)
   }
 
-  /* ── 大纲沟通：按反馈让 AI 修改规划 ── */
+  /* ── Talking the outline over: have the AI revise the plan from feedback ── */
   const doRevise = async () => {
     const fb = feedback.trim()
     if (!fb || revising || lessons.length === 0) return
     setRevising(true)
     setReviseErr('')
     setReviseNote('')
-    setLive('') // 流式展示修改过程的原始输出
+    setLive('') // show the raw output of the revision as it streams
     const ac = new AbortController()
     abortRef.current = ac
     try {
@@ -258,7 +268,8 @@ export function NewCourseDialog() {
         ac.signal,
         (chunk) => setLive((prev) => (prev + chunk).slice(-400)),
       )
-      // 标题未变的课时沿用其 file/skip（续写模式：已生成的不因改规划而重写）
+      // Lessons whose title is unchanged keep their file/skip (continue mode: an
+      // already-written lesson must not be rewritten just because the plan moved)
       const used = new Set<number>()
       const merged: PlanItem[] = next.map((l) => {
         const i = lessons.findIndex((p, idx) => !used.has(idx) && p.title === l.title)
@@ -270,7 +281,7 @@ export function NewCourseDialog() {
       })
       prevLessonsRef.current = lessons
       setLessons(merged)
-      setReviseNote(note || '已按反馈调整规划')
+      setReviseNote(note || t.generate.reviseApplied)
       setFeedback('')
     } catch (e) {
       if (!isAbortError(e)) setReviseErr((e as Error).message)
@@ -288,16 +299,16 @@ export function NewCourseDialog() {
     setReviseNote('')
   }
 
-  /* ── 课时规划 ── */
+  /* ── Lesson plan ── */
   const doPlan = async () => {
     if (!topic.trim()) {
-      setPlanErr('请先填写你想学习的内容')
+      setPlanErr(t.generate.topicRequired)
       return
     }
     setPlanErr('')
     setPhase('plan')
     setLessons([])
-    setLive('') // 流式展示规划生成的原始输出
+    setLive('') // show the raw planning output as it streams
     const ref = courses.find((c) => c.id === refId)
     try {
       refMatRef.current = ref ? await loadReference(ref) : { outline: '', sample: '' }
@@ -325,9 +336,12 @@ export function NewCourseDialog() {
     }
   }
 
-  /** 生成单个课时正文（start 与 retryFailed 共用）。断流自愈：连接中途断掉时，
-   *  把已收到的部分作为续写底稿接着写（最多 3 次尝试），而不是从头重写。
-   *  persist 非空时，写完立即入库——阅读器可以实时看到已完成的课时。 */
+  /** Generate one lesson's body (shared by start and retryFailed). Self-heals a
+   *  dropped stream: when the connection dies mid-flight, feed what was already
+   *  received back in as a draft and continue (up to 3 attempts) rather than
+   *  starting over.
+   *  When persist is given, the lesson is saved the moment it is written — the
+   *  reader can see finished lessons live. */
   const genOneLesson = useCallback(
     async (li: number, ac: AbortController, persist?: (text: string) => Promise<void>): Promise<void> => {
       const all = lessonsRef.current
@@ -339,8 +353,8 @@ export function NewCourseDialog() {
       const startedAt = Date.now()
       const tick = setInterval(() => setElapsed(Math.round((Date.now() - startedAt) / 1000)), 1000)
       try {
-        let partial = '' // 本轮流式已收到的正文（中断时成为续写底稿）
-        let reasoningTail = '' // 思考流尾巴（续写时上屏，避免看起来卡死）
+        let partial = '' // body received so far this round (becomes the draft when the stream drops)
+        let reasoningTail = '' // tail of the reasoning stream (shown while continuing, so it does not look stuck)
         const showTail = () => setLive((partial + reasoningTail).slice(-400))
         for (let attempt = 1; ; attempt++) {
           setLive(partial || '')
@@ -361,10 +375,10 @@ export function NewCourseDialog() {
                 nextFile: li < all.length - 1 ? lessonFile(li + 1) : undefined,
                 sampleSection: skill?.sample || refMatRef.current.sample,
                 styleGuide: skill?.styleGuide,
-                // 整书改写：以现有正文为底稿按改写要求重写
+                // Whole-book rewrite: use the existing body as the draft and rewrite it against the instructions
                 rewriteOf: rewriteModeRef.current ? (filesRef.current.get(lessonFile(li)) ?? '') : undefined,
                 rewriteNote: rewriteModeRef.current ? rewriteNoteRef.current : undefined,
-                // 断点续写：把已收到的部分交回去接着写
+                // Resume: hand back what was already received and continue from there
                 continueOf: partial || undefined,
               },
               (chunk) => {
@@ -372,7 +386,7 @@ export function NewCourseDialog() {
                 showTail()
               },
               ac.signal,
-              // 思考过程（推理模型）：也上屏，用户能看到模型确实在动
+              // Reasoning (on reasoning models): also shown, so the user can see the model is working
               (chunk) => {
                 reasoningTail = (reasoningTail + chunk).slice(-400)
                 showTail()
@@ -380,7 +394,7 @@ export function NewCourseDialog() {
             )
             filesRef.current.set(lessonFile(li), text)
             setSt(key, 'done')
-            if (persist) await persist(text) // 实时入库：阅读器立刻可读该课时
+            if (persist) await persist(text) // save live so the reader can open this lesson straight away
             return
           } catch (e) {
             if (isAbortError(e)) throw e
@@ -388,8 +402,8 @@ export function NewCourseDialog() {
               setSt(key, 'error')
               return
             }
-            await new Promise((r) => setTimeout(r, 1500)) // 退避后从断点续写
-            if (ac.signal.aborted) throw new DOMException('已停止', 'AbortError')
+            await new Promise((r) => setTimeout(r, 1500)) // back off, then continue from where it broke
+            if (ac.signal.aborted) throw new DOMException(tr().generate.stopped, 'AbortError')
           }
         }
       } finally {
@@ -399,64 +413,70 @@ export function NewCourseDialog() {
     [ai, setSt, skill],
   )
 
-  /** 当前规划的持久化形态（随课程记录保存，续写时恢复） */
+  /** The persisted form of the current plan (stored with the course record, restored on continuation) */
   const planToStore = (): StoredPlan => ({
     topic: topicRef.current,
     requirements: reqRef.current || undefined,
     lessons: lessonsRef.current.map(({ title, points }) => ({ title, points })),
   })
 
-  /** 生成结束（完成/失败/取消）统一收尾：有产出就入库，无产出回规划页。
-   *  生成期课程记录已实时建好（createdRef 非空），这里只统一 meta 与规划骨架。 */
+  /** Single wrap-up for the end of generation (finished / failed / cancelled):
+   *  save when there is output, go back to the plan when there is none.
+   *  The course record already exists from live saving (createdRef is non-nil),
+   *  so all this does is settle the meta and the plan skeleton. */
   const finalize = useCallback(
     async (fatalErr: string) => {
       const files = [...filesRef.current].map(([path, text]) => ({ path, text }))
       const plan = planToStore()
       const created = createdRef.current
       if (!created || files.length <= 1) {
-        // 一无所出：只有「本次会话新建的书」才清空壳记录；续写的原书任何情况都不能删
+        // Nothing produced: only a book created by this session gets its empty
+        // record removed; the original book of a continuation is never deleted
         if (created && files.length <= 1 && freshlyCreatedRef.current) {
           try {
             await deleteCourse(created.id)
           } catch {
-            /* 清理失败不打扰用户，回规划页重试即可 */
+            /* Cleanup failing is not worth troubling the user with; go back to the plan and retry */
           }
           createdRef.current = null
           freshlyCreatedRef.current = false
         }
         if (!created && files.length > 1) {
-          // 实时立记录失败退化的场景：课时在内存里，重试「开始」会再次尝试建记录入库
-          setGenErr(`课时已生成（${files.length - 1} 篇）但入库记录创建失败，请重试开始生成以完成入库。`)
+          // Degraded path where creating the record failed: the lessons are in
+          // memory, and pressing Start again retries creating the record
+          setGenErr(t.generate.generatedNotStored(files.length - 1))
         } else {
-          setGenErr(fatalErr || '没有生成出可用内容，请检查模型与网络后重试。')
+          setGenErr(fatalErr || t.generate.nothingGenerated)
         }
         setPhase('plan')
         return
       }
-      // 覆盖写回（新书的实时入库记录 / 续写改写的原书）：统一 meta、全量文件与规划骨架
+      // Overwrite in full (live record of a new book / original of a continuation):
+      // settle the meta, every file, and the plan skeleton together
       const meta: CourseMeta = {
         ...created,
         fileCount: files.length,
         files: files.map((f) => f.path),
-        desc: created.source === 'generated' ? `AI 生成 · ${lessonsRef.current.length} 课时` : created.desc,
+        desc: created.source === 'generated' ? t.generate.generatedDesc(lessonsRef.current.length) : created.desc,
       }
       try {
         await saveCourse(meta, files, Date.now(), plan)
       } catch (e) {
-        // 入库失败（配额/事务）绝不能静默：课时还在 filesRef，回规划页提示后可重试收尾
-        setGenErr(`入库失败：${(e as Error).message}。课时内容已保留，可点「开始」重新收尾。`)
+        // A failed save (quota / transaction) must never be silent: the lessons
+        // are still in filesRef, so the user can retry the wrap-up from the plan
+        setGenErr(t.generate.saveFailed((e as Error).message))
         setPhase('plan')
         return
       }
       createdRef.current = meta
       emitCourseCreated(meta)
-      setDoneInfo(`${meta.title} · ${files.length} 个文件`)
+      setDoneInfo(t.generate.doneInfo(meta.title, files.length))
       setPhase('done')
     },
-    [],
+    [t],
   )
 
-  /* ── 逐课时生成（并发池：1~4 路同时写，写完即入库可读） ── */
+  /* ── Lesson-by-lesson generation (pool of 1–4 writers; each lesson is saved the moment it lands) ── */
   const startGeneration = useCallback(async () => {
     const all = lessonsRef.current
     const ac = new AbortController()
@@ -464,7 +484,9 @@ export function NewCourseDialog() {
     setPhase('generating')
     setGenErr('')
     if (createdRef.current) {
-      // 续写：把「跳过」的既有正文按当前顺序归位到 lesson{i+1}.md（兼容增删/调序），并清掉不再被引用的旧课时文件
+      // Continue: move the skipped existing bodies into place as lesson{i+1}.md in
+      // the current order (tolerating inserts, deletions and reordering), then drop
+      // any old lesson files nothing refers to any more
       for (let i = 0; i < all.length; i++) {
         const item = all[i]
         if (item.skip && item.file && filesRef.current.has(item.file)) {
@@ -477,7 +499,8 @@ export function NewCourseDialog() {
         if (/^lesson\d+\.md$/.test(p) && !keep.has(p)) filesRef.current.delete(p)
       }
     } else if (!filesRef.current.has('INDEX.md') || filesRef.current.size <= 1) {
-      // 全新开始；上一轮「入库记录创建失败」留下的内存课时（size>1）原样保留，点开始可再次尝试入库
+      // Starting fresh; lessons left in memory by a previous "could not create the
+      // record" round (size>1) are kept, so pressing Start retries the save
       setFileStatus({})
       filesRef.current = new Map()
     } else {
@@ -487,21 +510,29 @@ export function NewCourseDialog() {
     }
     filesRef.current.set('INDEX.md', buildIndexMd(topicRef.current, all))
 
-    // 实时入库：开写前立课程记录（新书面目 + INDEX 目录 + 规划骨架），之后每课时写完即补
-    // 文件——生成中途就能去阅读器看已完成的课时；中途关浏览器留下的记录也能被续写完整恢复。
-    // continueCourse 场景记录已存在，无需重建。
-    // 注意：这里不能拿 filesRef.size 判断「有没有内容」——INDEX 刚 set 进去时 size=1，
-    // 拿 size>1 做条件会让新书永远建不了记录，全部产出滞留内存，一关页面就全丢。
+    // Live saving: create the course record before writing starts (so the book
+    // appears on the shelf with its INDEX and plan skeleton), then add each file
+    // as its lesson lands — finished lessons can be read while generation is
+    // still running, and a record left behind by closing the browser mid-run can
+    // be completed by a continuation. In continueCourse the record already
+    // exists, so there is nothing to create.
+    // Note: filesRef.size must not be used here to decide "is there content" —
+    // INDEX has just been set, so size is 1, and a size>1 test would mean a new
+    // book never gets a record, all its output staying in memory and being lost
+    // the moment the page closes.
     if (!createdRef.current) {
-      const title = topicRef.current.trim() || '未命名课件'
+      const title = topicRef.current.trim() || t.generate.untitled
       const meta: CourseMeta = {
         id: `c-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
         title,
-        seal: [...title][0] || '课',
-        desc: `AI 生成 · ${all.length} 课时`,
+        seal: [...title][0] || [...t.generate.untitled][0],
+        desc: t.generate.generatedDesc(all.length),
         kind: 'dir',
         fileCount: filesRef.current.size,
         files: [...filesRef.current.keys()],
+        // Stored only; the shelf groups by the category store's assignment, not by
+        // this field. Left in Chinese like every other course record so forked
+        // copies and older books stay consistent.
         category: '学习',
         format: 'md',
         source: 'generated',
@@ -509,32 +540,35 @@ export function NewCourseDialog() {
       try {
         await createCourseRecord(meta, planToStore())
       } catch (e) {
-        // 立记录失败（配额/IndexedDB 被禁）：退化为纯内存生成，结束时再走一次入库
-        setGenErr(`实时入库不可用（${(e as Error).message}），改为生成完成后一次性入库。`)
+        // Could not create the record (quota / IndexedDB disabled): degrade to
+        // generating purely in memory and saving once at the end
+        setGenErr(t.generate.liveStoreOff((e as Error).message))
       }
       if (createdRef.current === null) {
         createdRef.current = meta
         freshlyCreatedRef.current = true
-        // INDEX 目录先落库，阅读器打开时目录树才有结构（课时随后逐个补文件）
+        // Store the INDEX first, so the reader's tree has structure when opened (lesson files follow one by one)
         try {
           await updateCourseFile(meta.id, 'INDEX.md', filesRef.current.get('INDEX.md') ?? '')
         } catch {
-          /* 阅读器目录可能暂时打不开，不影响生成 */
+          /* The reader's tree may be temporarily unavailable; generation is unaffected */
         }
-        // 立刻通知书架：生成中的书马上可见、可点进去实时预览（不等全部写完）
+        // Tell the shelf immediately: the book in progress is visible and can be
+        // opened for a live preview, without waiting for every lesson
         emitCourseCreated(meta)
       }
     }
     const courseId = createdRef.current?.id
     const persist = courseId
       ? (li: number, text: string) =>
-          // 实时入库：阅读器立刻可读该课时；广播更新事件让开着的目录树长出新课时
+          // Live save: the reader can open this lesson at once; broadcasting the
+          // update lets an open tree grow the new lesson
           updateCourseFile(courseId, lessonFile(li), text).then((fresh) => {
             if (fresh) emitCourseUpdated(fresh)
           })
       : undefined
 
-    // 待写队列（按规划顺序出队；并发 worker 各自取活）
+    // Work queue (dequeued in plan order; each concurrent worker takes the next)
     const queue = all.map((_, i) => i).filter((i) => !(all[i].skip && filesRef.current.has(lessonFile(i))))
     const workers = Array.from({ length: Math.max(1, Math.min(4, parallel, queue.length)) }, async () => {
       for (;;) {
@@ -544,16 +578,16 @@ export function NewCourseDialog() {
           await genOneLesson(li, ac, persist ? (text) => persist(li, text) : undefined)
         } catch (e) {
           if (isAbortError(e)) return
-          // 断流/入库失败不终止整池：genOneLesson 内部已标 error，继续取下一个课时
+          // A dropped stream or failed save must not kill the pool: genOneLesson has already marked this one as errored, so take the next lesson
         }
       }
     })
     await Promise.all(workers)
     abortRef.current = null
     await finalize('')
-  }, [genOneLesson, finalize, parallel])
+  }, [genOneLesson, finalize, parallel, t])
 
-  /** 重写失败的课时（重生成后覆盖入库） */
+  /** Rewrite the lessons that failed (regenerate and save over them) */
   const retryFailed = useCallback(async () => {
     const failed = Object.entries(fileStatus)
       .filter(([, st]) => st === 'error')
@@ -593,7 +627,7 @@ export function NewCourseDialog() {
     abortRef.current?.abort()
   }
 
-  /* ── 课时规划编辑 ── */
+  /* ── Editing the lesson plan ── */
   const editLesson = (li: number, title: string) => {
     setLessons((ls) => ls.map((l, i) => (i === li ? { ...l, title } : l)))
   }
@@ -602,7 +636,7 @@ export function NewCourseDialog() {
     setLessons((ls) => ls.map((l, i) => (i === li ? { ...l, points } : l)))
   }
   const removeLesson = (li: number) => setLessons((ls) => ls.filter((_, i) => i !== li))
-  const addLesson = () => setLessons((ls) => [...ls, { title: `新课时`, points: [] }])
+  const addLesson = () => setLessons((ls) => [...ls, { title: t.generate.newLesson, points: [] }])
   const setSkip = (li: number, skip: boolean) =>
     setLessons((ls) => ls.map((l, i) => (i === li ? { ...l, skip } : l)))
   const moveLesson = (li: number, delta: number) => {
@@ -620,37 +654,37 @@ export function NewCourseDialog() {
   const chipText = (st: FileStatus): string =>
     st === 'done' ? '✓' : st === 'running' ? '…' : st === 'error' ? '✕' : '○'
 
-  /** 新标签页打开阅读器看某课时（HashRouter 下拼 hash 路由） */
+  /** Open a lesson in the reader in a new tab (build the hash route by hand under HashRouter) */
   const openLesson = (li: number) => {
     const id = createdRef.current?.id
     if (!id) return
-    const base = import.meta.env.BASE_URL // './' 或 '/'
+    const base = import.meta.env.BASE_URL // './' or '/'
     const prefix = base.endsWith('/') ? base : `${base}/`
     window.open(`${prefix}#/c/${id}?path=${encodeURIComponent(lessonFile(li))}`, '_blank')
   }
 
-  // 最小化：组件保持挂载（流式任务在跑），只是不渲染面板
+  // Minimising: the component stays mounted (a streaming job is running), it just renders nothing
   if (!visible) return null
 
   return (
     <Overlay onClose={phase === 'generating' ? minimize : close} closeOnOverlay={phase !== 'generating'}>
       <div className="sticky top-0 z-10 flex items-center justify-between border-b border-ink/15 bg-paper px-5 py-3">
-        <h2 className="font-song text-base font-bold tracking-wide">AI 著书</h2>
+        <h2 className="font-song text-base font-bold tracking-wide">{t.generate.title}</h2>
         <div className="flex items-center gap-2">
           {phase === 'generating' && (
             <button
               className="border border-ink/20 px-2.5 py-2 text-xs text-ink-faint transition hover:border-cinnabar/50 hover:text-cinnabar md:py-0.5"
               onClick={minimize}
-              title="收起对话框，生成在后台继续；可随时去书架/阅读器预览已写完的课时"
+              title={t.generate.minimizeHint}
             >
-              收起
+              {t.generate.minimize}
             </button>
           )}
           {phase !== 'generating' && (
             <button
               className="-my-2 -mr-2 p-2 text-ink-faint transition hover:text-cinnabar"
               onClick={close}
-              aria-label="关闭"
+              aria-label={t.generate.close}
             >
               ✕
             </button>
@@ -658,31 +692,29 @@ export function NewCourseDialog() {
         </div>
       </div>
 
-      {/* ── 第一步：学习意向 ── */}
+      {/* ── Step 1: what to learn ── */}
       {phase === 'form' && (
         <div className="space-y-4 p-5">
           <div>
-            <label className="mb-1 block text-sm font-semibold">你想学习什么？</label>
+            <label className="mb-1 block text-sm font-semibold">{t.generate.topic}</label>
             <input
               className={inputCls}
-              placeholder="如：Docker 容器原理与实战 / 明清史入门 / 线性代数"
+              placeholder={t.generate.topicPlaceholder}
               value={topic}
               onChange={(e) => setTopic(e.target.value)}
             />
           </div>
           <div>
-            <label className="mb-1 block text-sm font-semibold">
-              需求（可选，直接粘贴）
-            </label>
+            <label className="mb-1 block text-sm font-semibold">{t.generate.requirements}</label>
             <textarea
               className={`${inputCls} min-h-32 resize-y`}
-              placeholder={'把你已有的东西直接贴进来，例如：\n· 课程大纲 / 章节目录\n· 课时数要求（如「20 课时，每课时 45 分钟」）\n· 目标读者、深度、风格偏好\n· 指定教材或参考书'}
+              placeholder={t.generate.requirementsPlaceholder}
               value={requirements}
               onChange={(e) => setRequirements(e.target.value)}
             />
           </div>
           <div>
-            <label className="mb-1 block text-sm font-semibold">参考课件（可选，学习其组织方式）</label>
+            <label className="mb-1 block text-sm font-semibold">{t.generate.reference}</label>
             <select className={inputCls} value={refId} onChange={(e) => setRefId(e.target.value)}>
               {courses.map((c) => (
                 <option key={c.id} value={c.id}>
@@ -692,17 +724,17 @@ export function NewCourseDialog() {
             </select>
           </div>
           <div>
-            <label className="mb-1 block text-sm font-semibold">风格 Skill</label>
+            <label className="mb-1 block text-sm font-semibold">{t.generate.styleSkill}</label>
             <div className="flex items-center gap-2">
               <select className={inputCls} value={skillId} onChange={(e) => setSkillId(e.target.value)}>
                 <option value={DEFAULT_SKILL.id}>{DEFAULT_SKILL.name}</option>
                 {skills.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.name}
-                    {s.from ? `（源自 ${s.from}）` : ''}
+                    {s.from ? t.generate.skillFrom(s.from) : ''}
                   </option>
                 ))}
-                <option value="">极简骨架</option>
+                <option value="">{t.generate.skillMinimal}</option>
               </select>
               {skill && skill.id !== DEFAULT_SKILL.id && (
                 <button
@@ -712,7 +744,7 @@ export function NewCourseDialog() {
                     setSkillId('')
                   }}
                 >
-                  删除
+                  {t.generate.skillDelete}
                 </button>
               )}
               <button
@@ -725,18 +757,16 @@ export function NewCourseDialog() {
                   setDistillOpen((v) => !v)
                 }}
               >
-                {distillOpen ? '收起' : '提炼新 skill…'}
+                {distillOpen ? t.generate.distillClose : t.generate.distillOpen}
               </button>
             </div>
-            <p className="mt-1 text-xs text-ink-faint">
-              从现有课件提炼写作风格规范（文风、骨架、图示习惯），著书时注入，让产出延续同样的风格。
-            </p>
+            <p className="mt-1 text-xs text-ink-faint">{t.generate.distillHint}</p>
 
             {distillOpen && (
               <div className="mt-3 space-y-3 border border-ink/15 p-3">
                 <div className="flex items-end gap-2">
                   <div className="flex-1">
-                    <label className="mb-1 block text-xs font-semibold">从哪门课提炼？</label>
+                    <label className="mb-1 block text-xs font-semibold">{t.generate.distillFrom}</label>
                     <select className={inputCls} value={distillRefId} onChange={(e) => setDistillRefId(e.target.value)}>
                       {courses.map((c) => (
                         <option key={c.id} value={c.id}>
@@ -750,7 +780,7 @@ export function NewCourseDialog() {
                     onClick={() => void doDistill()}
                     disabled={distilling || courses.length === 0}
                   >
-                    {distilling ? '提炼中…' : '提炼'}
+                    {distilling ? t.generate.distillRunning : t.generate.distillRun}
                   </button>
                 </div>
                 {distillErr && <p className="text-xs leading-5 text-cinnabar-deep">{distillErr}</p>}
@@ -758,7 +788,7 @@ export function NewCourseDialog() {
                   <div className="space-y-2">
                     <input
                       className={inputCls}
-                      placeholder="skill 名称"
+                      placeholder={t.generate.distillNamePlaceholder}
                       value={draftName}
                       onChange={(e) => setDraftName(e.target.value)}
                     />
@@ -767,7 +797,7 @@ export function NewCourseDialog() {
                       value={draftGuide}
                       onChange={(e) => setDraftGuide(e.target.value)}
                     />
-                    <p className="text-xs text-ink-faint">提炼结果可直接修改，满意后保存。样例节会一并存入 skill。</p>
+                    <p className="text-xs text-ink-faint">{t.generate.distillEditHint}</p>
                     <div className="flex items-center justify-end gap-3">
                       <button
                         className="border border-ink/25 px-3 py-1.5 text-xs text-ink-soft transition hover:border-cinnabar/50"
@@ -776,14 +806,14 @@ export function NewCourseDialog() {
                           setDistillOpen(false)
                         }}
                       >
-                        放弃
+                        {t.generate.distillDiscard}
                       </button>
                       <button
                         className="bg-cinnabar px-3 py-1.5 text-xs text-paper transition hover:bg-cinnabar-deep disabled:opacity-40"
                         onClick={saveDraftSkill}
                         disabled={!draftGuide.trim() || !draftName.trim()}
                       >
-                        保存并使用
+                        {t.generate.distillSave}
                       </button>
                     </div>
                   </div>
@@ -793,7 +823,7 @@ export function NewCourseDialog() {
           </div>
           {(!ai.apiKey || !ai.model) && (
             <p className="border border-cinnabar/40 bg-cinnabar/5 px-3 py-2 text-xs leading-5 text-cinnabar-deep">
-              尚未配置 AI：请先到「设置」填写请求地址与 API Key。
+              {t.generate.noAi}
             </p>
           )}
           {planErr && (
@@ -804,36 +834,34 @@ export function NewCourseDialog() {
               className="border border-ink/25 px-4 py-2 text-sm text-ink-soft transition hover:border-cinnabar/50 md:py-1.5"
               onClick={close}
             >
-              取消
+              {t.common.cancel}
             </button>
             <button
               className="bg-cinnabar px-4 py-2 text-sm text-paper transition hover:bg-cinnabar-deep disabled:opacity-40 md:py-1.5"
               onClick={() => void doPlan()}
               disabled={!topic.trim() || !ai.apiKey || !ai.model}
             >
-              生成课时规划
+              {t.generate.toPlan}
             </button>
           </div>
         </div>
       )}
 
-      {/* ── 第二步：课时规划确认 ── */}
+      {/* ── Step 2: confirm the lesson plan ── */}
       {phase === 'plan' && (
         <div className="p-5">
           {rewriteMode && (
             <div className="mb-3 space-y-2 border border-cinnabar/30 bg-cinnabar/5 p-3">
-              <p className="text-xs font-semibold text-ink">
-                整书改写 · 共 {lessons.length} 课时将全部重写（勾「跳过」的课时保留原文）
-              </p>
+              <p className="text-xs font-semibold text-ink">{t.generate.rewriteBanner(lessons.length)}</p>
               <textarea
                 className={`${inputCls} min-h-16 resize-y text-xs`}
-                placeholder={'整体改写要求，例如：\n· 面向零基础，多打比方，少用术语\n· 压缩篇幅到原来的 2/3，保留全部代码示例\n· 每节增加一个动手练习'}
+                placeholder={t.generate.rewritePlaceholder}
                 value={rewriteNote}
                 onChange={(e) => setRewriteNote(e.target.value)}
                 disabled={revising}
               />
               <div className="flex items-center gap-2">
-                <span className="shrink-0 text-xs text-ink-faint">风格 Skill</span>
+                <span className="shrink-0 text-xs text-ink-faint">{t.generate.styleSkill}</span>
                 <select
                   className={`${inputCls} max-w-72 text-xs`}
                   value={skillId}
@@ -844,17 +872,17 @@ export function NewCourseDialog() {
                   {skills.map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.name}
-                      {s.from ? `（源自 ${s.from}）` : ''}
+                      {s.from ? t.generate.skillFrom(s.from) : ''}
                     </option>
                   ))}
-                  <option value="">极简骨架</option>
+                  <option value="">{t.generate.skillMinimal}</option>
                 </select>
               </div>
             </div>
           )}
           {lessons.length === 0 ? (
             <div className="py-8">
-              <p className="text-center text-sm text-ink-faint">课时规划构思中……</p>
+              <p className="text-center text-sm text-ink-faint">{t.generate.planning}</p>
               {live && (
                 <pre className="mx-auto mt-4 max-h-40 max-w-xl overflow-y-auto whitespace-pre-wrap break-all border border-ink/15 bg-paper-deep/40 p-3 text-xs leading-5 text-ink-faint">
                   {live}
@@ -865,11 +893,12 @@ export function NewCourseDialog() {
             <>
               <p className="mb-3 text-xs text-ink-faint">
                 {continueCourse
-                  ? `已生成 ${lessons.filter((l) => l.skip).length} / ${lessons.length} 课时。勾「跳过」的沿用已有正文，其余沿规划续写；标题、要点可改，也可加新课时。`
-                  : `共 ${lessons.length} 课时。确认后逐课时生成；标题、要点、顺序都可改，也可增删。`}
+                  ? t.generate.planSummaryContinue(lessons.filter((l) => l.skip).length, lessons.length)
+                  : t.generate.planSummary(lessons.length)}
               </p>
-              {/* 窄屏不套内层滚动：让课时卡自然撑开、由外层面板统一滚，
-                  否则两层滚动条在手机上很难点到下面那层 */}
+              {/* No inner scroll on narrow screens: let the lesson cards grow and
+                  the outer panel scroll, or two scrollbars make the lower one
+                  nearly impossible to reach on a phone */}
               <div className={`max-h-[42vh] space-y-3 overflow-y-auto overscroll-contain pr-1 max-md:max-h-none max-md:overflow-visible ${revising ? 'pointer-events-none opacity-60' : ''}`}>
                 {lessons.map((l, li) => (
                   <div key={li} className="border border-ink/15 p-3">
@@ -883,7 +912,7 @@ export function NewCourseDialog() {
                       {continueCourse && (
                         <label
                           className="order-last flex w-full shrink-0 cursor-pointer select-none items-center gap-1.5 py-1 text-xs text-ink-faint md:order-none md:w-auto md:py-0"
-                          title="勾选则沿用已有正文，不重新生成"
+                          title={t.generate.skipHint}
                         >
                           <input
                             type="checkbox"
@@ -891,28 +920,28 @@ export function NewCourseDialog() {
                             checked={!!l.skip}
                             onChange={(e) => setSkip(li, e.target.checked)}
                           />
-                          跳过
+                          {t.generate.skip}
                         </label>
                       )}
                       <div className="flex shrink-0 items-center gap-0.5">
                         <button
                           className="flex h-8 w-8 items-center justify-center text-xs text-ink-faint transition hover:text-cinnabar md:h-6 md:w-6"
                           onClick={() => moveLesson(li, -1)}
-                          aria-label="上移"
+                          aria-label={t.generate.moveUp}
                         >
                           ↑
                         </button>
                         <button
                           className="flex h-8 w-8 items-center justify-center text-xs text-ink-faint transition hover:text-cinnabar md:h-6 md:w-6"
                           onClick={() => moveLesson(li, 1)}
-                          aria-label="下移"
+                          aria-label={t.generate.moveDown}
                         >
                           ↓
                         </button>
                         <button
                           className="flex h-8 w-8 shrink-0 items-center justify-center border border-ink/20 text-xs text-ink-faint transition hover:border-cinnabar hover:text-cinnabar md:h-6 md:w-6"
                           onClick={() => removeLesson(li)}
-                          aria-label="删除本课时"
+                          aria-label={t.generate.removeLesson}
                         >
                           ✕
                         </button>
@@ -920,7 +949,7 @@ export function NewCourseDialog() {
                     </div>
                     <textarea
                       className={`${inputCls} mt-2 min-h-16 resize-y text-xs`}
-                      placeholder="本课时要点（每行一条）"
+                      placeholder={t.generate.pointsPlaceholder}
                       value={l.points.join('\n')}
                       onChange={(e) => editPoints(li, e.target.value)}
                     />
@@ -928,12 +957,12 @@ export function NewCourseDialog() {
                 ))}
               </div>
 
-              {/* 和 AI 商量：按反馈修改规划 */}
+              {/* Talk it over with the AI: revise the plan from feedback */}
               <div className="mt-3 border border-ink/15 p-3">
-                <p className="mb-2 text-xs font-semibold text-ink">和 AI 商量这版规划</p>
+                <p className="mb-2 text-xs font-semibold text-ink">{t.generate.discuss}</p>
                 <textarea
                   className={`${inputCls} min-h-16 resize-y text-xs`}
-                  placeholder={'直接说想怎么改，例如：\n· 压缩到 10 讲，把实践内容合并\n· 第 4 讲太难了，拆成两讲循序渐进\n· 加两节关于 X 的课时；历史部分砍掉'}
+                  placeholder={t.generate.feedbackPlaceholder}
                   value={feedback}
                   onChange={(e) => setFeedback(e.target.value)}
                   disabled={revising}
@@ -944,14 +973,14 @@ export function NewCourseDialog() {
                     onClick={() => void doRevise()}
                     disabled={revising || !feedback.trim() || !ai.apiKey || !ai.model}
                   >
-                    {revising ? 'AI 修改中…' : '让 AI 修改规划'}
+                    {revising ? t.generate.revising : t.generate.revise}
                   </button>
                   {prevLessonsRef.current && !revising && (
                     <button
                       className="-my-1 px-1 py-2 text-xs text-ink-faint transition hover:text-cinnabar"
                       onClick={undoRevise}
                     >
-                      撤销本次修改
+                      {t.generate.undoRevise}
                     </button>
                   )}
                   {reviseNote && (
@@ -976,10 +1005,10 @@ export function NewCourseDialog() {
                 onClick={addLesson}
                 disabled={revising}
               >
-                ＋ 加一课时
+                {t.generate.addLesson}
               </button>
-              <label className="flex items-center gap-1.5 text-xs text-ink-faint" title="同时生成几路课时：越高越快，但可能撞供应商限流（429）；1 = 纯串行">
-                并发
+              <label className="flex items-center gap-1.5 text-xs text-ink-faint" title={t.generate.parallelHint}>
+                {t.generate.parallel}
                 <select
                   className="border border-ink/20 bg-paper px-1.5 py-1.5 text-xs text-ink outline-none focus:border-cinnabar md:py-0.5"
                   value={parallel}
@@ -988,20 +1017,20 @@ export function NewCourseDialog() {
                 >
                   {[1, 2, 3, 4].map((n) => (
                     <option key={n} value={n}>
-                      {n} 路
+                      {t.generate.lanes(n)}
                     </option>
                   ))}
                 </select>
               </label>
             </div>
-            {/* ml-auto 让右边的按钮组换行后仍然贴右 */}
+            {/* ml-auto keeps the right-hand button group pinned right even after it wraps */}
             <div className="ml-auto flex flex-wrap items-center gap-3">
               <button
                 className="border border-ink/25 px-4 py-2 text-sm text-ink-soft transition hover:border-cinnabar/50 disabled:opacity-40 md:py-1.5"
                 onClick={() => setPhase('form')}
                 disabled={revising}
               >
-                上一步
+                {t.generate.back}
               </button>
               <button
                 className="bg-cinnabar px-4 py-2 text-sm text-paper transition hover:bg-cinnabar-deep disabled:opacity-40 md:py-1.5"
@@ -1013,34 +1042,33 @@ export function NewCourseDialog() {
                 }}
                 disabled={revising || lessons.length === 0 || (!!continueCourse && lessons.every((l) => l.skip))}
               >
-                {rewriteMode ? '开始整书改写' : continueCourse ? '继续生成缺失课时' : '开始逐课时生成'}
+                {rewriteMode ? t.generate.startRewrite : continueCourse ? t.generate.startContinue : t.generate.start}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ── 第三步：生成进度 ── */}
+      {/* ── Step 3: progress ── */}
       {phase === 'generating' && (
         <div className="p-5">
           <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-2">
             <p className="min-w-0 flex-1 truncate text-sm text-ink-soft">
-              正在生成：<span className="font-semibold text-ink">{activity}</span>
+              {t.generate.generatingLabel}
+              <span className="font-semibold text-ink">{activity || t.generate.generatingIdle}</span>
             </p>
             {createdRef.current && (
               <button
                 className="shrink-0 border border-ink/20 px-2.5 py-1.5 text-xs text-ink-soft transition hover:border-cinnabar/50 hover:text-cinnabar-deep md:py-1"
                 onClick={() => openLesson(0)}
-                title="新标签页打开阅读器；已写完的课时立即可读，未写的显示加载失败属正常"
+                title={t.generate.previewHint}
               >
-                <span className="md:hidden">预览 ↗</span>
-                <span className="hidden md:inline">开新标签页预览 ↗</span>
+                <span className="md:hidden">{t.generate.preview}</span>
+                <span className="hidden md:inline">{t.generate.previewLong}</span>
               </button>
             )}
           </div>
-          <p className="mt-1 text-xs text-ink-faint">
-            {Math.max(1, Math.min(4, parallel))} 路并发生成中 · 本轮已用 {elapsed} 秒 · 课时写完即可在预览中阅读
-          </p>
+          <p className="mt-1 text-xs text-ink-faint">{t.generate.progress(Math.max(1, Math.min(4, parallel)), elapsed)}</p>
           {live && (
             <pre className="mt-3 max-h-32 overflow-y-auto whitespace-pre-wrap break-all border border-ink/15 bg-paper-deep/40 p-3 text-xs leading-5 text-ink-faint">
               {live}
@@ -1060,7 +1088,7 @@ export function NewCourseDialog() {
                       className="-my-1 shrink-0 px-1 py-1.5 text-xs text-cinnabar-deep underline underline-offset-2 transition hover:text-cinnabar"
                       onClick={() => openLesson(li)}
                     >
-                      去看 ↗
+                      {t.generate.goRead}
                     </button>
                   )}
                 </div>
@@ -1073,21 +1101,19 @@ export function NewCourseDialog() {
               className="border border-ink/25 px-4 py-2 text-sm text-ink-soft transition hover:border-cinnabar/50 hover:text-cinnabar-deep md:py-1.5"
               onClick={cancel}
             >
-              停止并保留已完成课时
+              {t.generate.stop}
             </button>
           </div>
         </div>
       )}
 
-      {/* ── 第四步：完成 ── */}
+      {/* ── Step 4: done ── */}
       {phase === 'done' && (
         <div className="p-5 text-center">
-          <p className="mt-4 font-song text-2xl font-bold text-ink">书成 ✦</p>
+          <p className="mt-4 font-song text-2xl font-bold text-ink">{t.generate.done}</p>
           <p className="mt-3 text-sm text-ink-soft">{doneInfo}</p>
           <p className="mt-1 text-xs text-ink-faint">
-            {continueCourse
-              ? '课件已写回本书，关闭后即可阅读新生成的课时。'
-              : '课件已入库，回到书架即可开读、可导出、可继续让 AI 改写。'}
+            {continueCourse ? t.generate.doneContinue : t.generate.doneNew}
           </p>
           {Object.values(fileStatus).some((st) => st === 'error') ? (
             <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
@@ -1095,21 +1121,21 @@ export function NewCourseDialog() {
                 className="border border-cinnabar/50 px-5 py-2 text-sm text-cinnabar-deep transition hover:bg-cinnabar/5 md:py-1.5"
                 onClick={() => void retryFailed()}
               >
-                重写失败课时
+                {t.generate.retryFailed}
               </button>
               {createdRef.current && (
                 <button
                   className="border border-ink/20 px-5 py-2 text-sm text-ink-soft transition hover:border-cinnabar/50 hover:text-cinnabar-deep md:py-1.5"
                   onClick={() => openLesson(0)}
                 >
-                  去阅读 ↗
+                  {t.generate.goReadLong}
                 </button>
               )}
               <button
                 className="bg-cinnabar px-5 py-2 text-sm text-paper transition hover:bg-cinnabar-deep md:py-1.5"
                 onClick={close}
               >
-                {continueCourse ? '完成' : '回书架'}
+                {continueCourse ? t.generate.finish : t.generate.backToShelf}
               </button>
             </div>
           ) : (
@@ -1117,7 +1143,7 @@ export function NewCourseDialog() {
               className="mt-5 bg-cinnabar px-5 py-2 text-sm text-paper transition hover:bg-cinnabar-deep md:py-1.5"
               onClick={close}
             >
-              {continueCourse ? '完成' : '回书架'}
+              {continueCourse ? t.generate.finish : t.generate.backToShelf}
             </button>
           )}
         </div>

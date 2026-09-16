@@ -5,9 +5,10 @@ import { act } from 'react'
 import { NewCourseDialog } from './NewCourseDialog'
 import { useGenerateStore } from './generateStore'
 
-// 渲染冒烟：点「续写」后对话框应正常出面板，而不是整树崩溃（线上曾报空白页）
-describe('NewCourseDialog 续写冒烟', () => {
-  it('continueCourse 打开 → 组件可渲染且不抛错', async () => {
+// Render smoke test: after hitting "continue" the dialog should show its panel
+// rather than crashing the whole tree (this once shipped as a blank page)
+describe('NewCourseDialog continuation smoke test', () => {
+  it('opening with continueCourse renders without throwing', async () => {
     const host = document.createElement('div')
     document.body.appendChild(host)
     const root = createRoot(host)
@@ -33,8 +34,10 @@ describe('NewCourseDialog 续写冒烟', () => {
         caught = e
       }
     })
-    // 续写初始化读 Dexie（测试环境无库）→ 异步失败路径走「续写初始化失败」回 form 页；
-    // 只要渲染本身不崩即可（线上空白页 = 渲染期抛错带崩整树）
+    // Continuation setup reads Dexie, which does not exist here, so the async
+    // failure path reports "could not set up the continuation" and returns to the form;
+    // All that matters is that rendering itself does not blow up (the blank page
+    // came from a throw during render taking the whole tree down)
     expect(caught).toBeNull()
     await act(async () => {
       await new Promise((r) => setTimeout(r, 50))
