@@ -1,16 +1,20 @@
 // The floating toolbar for a text selection: two little seals — "ask" (Ask AI)
 // and "mark" (highlight + note, no AI) — pop up beside the selection.
-// On touch devices the system's own selection menu (copy / look up / share) sits
-// against the selection too, so there we move the seals to the other side and
-// grow the buttons to 44px square: clear of that menu, and big enough to hit.
+//
+// On a phone the platform draws an unmissable menu of its own against the
+// selection (Copy / Share / Select all / Translate) and will happily sit on top of
+// ours. It cannot be measured or asked where it is — it is not in our DOM — so we
+// go by its habit instead: Android puts that bar *below* the selection, iOS puts
+// its callout *above*, and we take the opposite side. If that side has no room we
+// take the platform's side anyway but far enough out to clear its menu rather than
+// hide underneath it.
 import { useLayoutEffect, useRef, useState } from 'react'
+import { isAppleTouch, isTouchDevice } from '../platform'
 import { useI18n } from '../i18n'
 
 const GAP = 8
-
-function isCoarsePointer(): boolean {
-  return window.matchMedia?.('(pointer: coarse)')?.matches ?? false
-}
+/** Roughly the height of the platform's own selection menu, plus a little air */
+const MENU_CLEARANCE = 64
 
 export function FloatingToolbar({
   x,
@@ -39,14 +43,28 @@ export function FloatingToolbar({
     const { offsetWidth: w, offsetHeight: h } = el
     const vw = window.innerWidth
     const vh = window.innerHeight
+    const left = Math.max(GAP, Math.min(x, vw - w - GAP))
 
-    let top = y + GAP // desktop: tuck under the selection's bottom-right
-    if (isCoarsePointer() && selTop - h - GAP >= GAP) top = selTop - h - GAP // touch: flip above it
+    let top: number
+    if (!isTouchDevice()) {
+      // A mouse has no platform menu to dodge, so tuck it under the selection's bottom-right
+      top = y + GAP
+    } else {
+      const above = selTop - h - GAP
+      const below = y + GAP
+      const fitsAbove = above >= GAP
+      const fitsBelow = below + h <= vh - GAP
+      // Android's bar is below the selection, so ours goes above; on iOS the callout
+      // is above, so ours goes below
+      const weWantAbove = !isAppleTouch()
+      if (weWantAbove && fitsAbove) top = above
+      else if (!weWantAbove && fitsBelow) top = below
+      else if (weWantAbove && fitsBelow) top = below + MENU_CLEARANCE
+      else if (!weWantAbove && fitsAbove) top = above - MENU_CLEARANCE
+      else top = weWantAbove ? above : below
+    }
 
-    setPos({
-      left: Math.max(GAP, Math.min(x, vw - w - GAP)),
-      top: Math.max(GAP, Math.min(top, vh - h - GAP)),
-    })
+    setPos({ left, top: Math.max(GAP, Math.min(top, vh - h - GAP)) })
   }, [x, y, selTop])
 
   return (

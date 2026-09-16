@@ -21,6 +21,7 @@ import { storeFor } from '../course'
 import type { CourseMeta } from '../types/course'
 import { stripFenceWrap } from '../generate/pipeline'
 import { useSettingsStore } from '../store/settingsStore'
+import { isTouchDevice } from '../platform'
 import { tr, useI18n } from '../i18n'
 
 interface Turn {
@@ -213,7 +214,7 @@ export function AskPanel({
 
   // Touch: soft keyboards have no Shift, so Enter has to mean newline (sending
   // goes through the button instead) — and the hint text has to match.
-  const [coarsePointer] = useState(() => window.matchMedia?.('(pointer: coarse)')?.matches ?? false)
+  const [touch] = useState(isTouchDevice)
 
   // Below md the panel is a full-screen overlay, so system-back closes it first;
   // above md it is a side-by-side column and back should follow the route.
@@ -599,7 +600,7 @@ export function AskPanel({
   const onInputKey = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key !== 'Enter' || e.shiftKey) return
     // No Shift on a touch soft keyboard, so Enter always inserts a newline there and the Send button does the sending
-    if (coarsePointer) return
+    if (touch) return
     e.preventDefault()
     send()
   }
@@ -802,7 +803,7 @@ export function AskPanel({
               />
               <div className="flex items-center justify-between gap-2 border-t border-ink/10 px-2.5 py-1.5">
                 <span className="min-w-0 pl-1 text-[11px] leading-4 text-ink-faint">
-                  {mode === 'edit' ? t.ask.hintEdit : coarsePointer ? t.ask.hintTouch : t.ask.hintDesktop}
+                  {mode === 'edit' ? t.ask.hintEdit : touch ? t.ask.hintTouch : t.ask.hintDesktop}
                 </span>
                 {streaming ? (
                   <button
