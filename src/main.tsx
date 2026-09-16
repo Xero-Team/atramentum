@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client'
 import App from './App'
 import { initTheme } from './store/theme'
 import { registerServiceWorker } from './pwa/register'
+import { initInstallPrompt } from './pwa/install'
 import './styles/base.css'
 import './styles/prose.css'
 
@@ -14,6 +15,9 @@ initTheme()
 
 // 离线外壳与「装到桌面」；仅在构建产物里生效（dev 下注册会跟热更新打架）
 registerServiceWorker()
+
+// beforeinstallprompt 发得早、且只发一次，渲染前就得开始听
+initInstallPrompt()
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

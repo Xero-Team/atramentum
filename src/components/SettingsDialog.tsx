@@ -5,6 +5,7 @@ import { PRESET_ENDPOINTS } from '../types/ai'
 import { chat, describeAIError, isAbortError, listModels } from '../ai/providers'
 import { useSettingsStore } from '../store/settingsStore'
 import type { ThemeMode } from '../store/settingsStore'
+import { promptInstall, useInstallState } from '../pwa/install'
 import { Overlay } from './common/Overlay'
 
 const inputCls =
@@ -25,6 +26,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const setAIPreset = useSettingsStore((s) => s.setAIPreset)
   const theme = useSettingsStore((s) => s.theme)
   const setTheme = useSettingsStore((s) => s.setTheme)
+  const install = useInstallState()
 
   // 当前 baseURL 命中哪个预设；都没中即「自定义」
   const effectivePreset = useMemo(
@@ -136,6 +138,35 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           <p className="mt-1 text-xs text-ink-faint">
             深色作水墨调：夜色般的墨底、宣纸白的字，青替朱砂作强调色。标题栏的 ☾ / ☀ 可随手切换。
           </p>
+        </section>
+
+        <section>
+          <h3 className="mb-2 text-sm font-semibold text-ink">安装到桌面</h3>
+          {install === 'installed' && <p className="text-xs leading-6 text-ink-faint">✓ 已作为应用运行。</p>}
+          {install === 'prompt' && (
+            <>
+              <button
+                className="bg-cinnabar px-4 py-2 text-sm text-paper transition hover:bg-cinnabar-deep md:py-1.5"
+                onClick={() => void promptInstall()}
+              >
+                安装到桌面
+              </button>
+              <p className="mt-1 text-xs text-ink-faint">
+                全屏打开、不带浏览器地址栏；读过的书断网也能翻。问 AI 之类仍然需要联网。
+              </p>
+            </>
+          )}
+          {install === 'ios' && (
+            <p className="text-xs leading-6 text-ink-faint">
+              在 Safari 点「分享」→「添加到主屏幕」，即可把墨痕当应用打开（iOS 不允许网页自己弹出安装）。
+            </p>
+          )}
+          {install === 'manual' && (
+            <p className="text-xs leading-6 text-ink-faint">
+              这个浏览器没给出安装入口。可以找找地址栏右侧的安装图标，或浏览器菜单里的「安装应用 / 添加到主屏幕」——
+              书架的引导条关掉后也能从这里重来。
+            </p>
+          )}
         </section>
 
         <section>

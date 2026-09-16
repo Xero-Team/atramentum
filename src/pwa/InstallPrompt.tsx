@@ -1,41 +1,19 @@
 /**
- * 安装引导条。
+ * 书架的安装引导条——首次发现的入口。
  *
- * Chromium 系有 beforeinstallprompt，能弹原生安装框，就给个「安装」按钮；
- * iOS Safari 没有这个事件、也不允许程序触发安装，只能把「分享 → 添加到主屏幕」
- * 这一步写清楚。已经装过（standalone）或用户关过的，不再出现。
+ * 只负责「让人知道这回事」：关掉之后就不再出现，但设置里那个「安装到桌面」
+ * 是常驻的，随时可以回去点（避免出现「手滑关掉就再也装不上」的死角）。
+ *
+ * 状态与安装动作都取自 pwa/install.ts —— beforeinstallprompt 只能消费一次，
+ * 不能各存各的。
  */
-import { useEffect, useState } from 'react'
-
-interface BeforeInstallPromptEvent extends Event {
-  prompt: () => Promise<void>
-  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>
-}
+import { useState } from 'react'
+import { promptInstall, useInstallState } from './install'
 
 const DISMISS_KEY = 'moxue-install-dismissed'
 
-/** 是否已经以独立窗口运行（即已装到桌面） */
-function isStandalone(): boolean {
-  return (
-    window.matchMedia?.('(display-mode: standalone)')?.matches === true ||
-    // iOS Safari 特有：从主屏图标打开时为 true
-    (navigator as Navigator & { standalone?: boolean }).standalone === true
-  )
-}
-
-/** 是否 iOS 上的 Safari——只有它能「添加到主屏幕」 */
-function isIosSafari(): boolean {
-  const ua = navigator.userAgent
-  // iPadOS 13 起 UA 伪装成 macOS，靠触摸点数认出来
-  const isIos = /iP(hone|ad|od)/.test(ua) || (ua.includes('Macintosh') && navigator.maxTouchPoints > 1)
-  if (!isIos) return false
-  // iOS 上的 Chrome / Firefox / Edge 都是 WebKit 套壳，没有「添加到主屏幕」
-  return !/CriOS|FxiOS|EdgiOS|OPiOS|Mercury/i.test(ua)
-}
-
 export function InstallPrompt() {
-  const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(null)
-  const [iosHint, setIosHint] = useState(false)
+  const state = useInstallState()
   const [hidden, setHidden] = useState(() => {
     try {
       return localStorage.getItem(DISMISS_KEY) === '1'
@@ -43,27 +21,6 @@ export function InstallPrompt() {
       return false
     }
   })
-
-  useEffect(() => {
-    if (hidden || isStandalone()) return
-
-    if (isIosSafari()) {
-      setIosHint(true)
-      return
-    }
-
-    const onPrompt = (e: Event) => {
-      e.preventDefault() // 拦掉浏览器自带的迷你信息条，改用自己的入口
-      setDeferred(e as BeforeInstallPromptEvent)
-    }
-    const onInstalled = () => setDeferred(null)
-    window.addEventListener('beforeinstallprompt', onPrompt as EventListener)
-    window.addEventListener('appinstalled', onInstalled)
-    return () => {
-      window.removeEventListener('beforeinstallprompt', onPrompt as EventListener)
-      window.removeEventListener('appinstalled', onInstalled)
-    }
-  }, [hidden])
 
   const dismiss = () => {
     try {
@@ -75,15 +32,12 @@ export function InstallPrompt() {
   }
 
   const install = async () => {
-    if (!deferred) return
-    await deferred.prompt()
-    const { outcome } = await deferred.userChoice
-    // 用户在原生框里点了取消，就当他也拒绝了这次引导
-    if (outcome === 'accepted') setDeferred(null)
-    else dismiss()
+    const outcome = await promptInstall()
+    // 用户在原生框里点了取消，就当他也拒绝了这次引导；真的装了则状态会变成 installed
+    if (outcome === 'dismissed') dismiss()
   }
 
-  if (hidden || (!deferred && !iosHint)) return null
+  if (hidden || state === 'installed') return null
 
   const btn =
     'shrink-0 border border-ink/20 px-2.5 py-1.5 text-xs text-ink-soft transition hover:border-cinnabar/50 hover:text-cinnabar-deep'
@@ -91,7 +45,7 @@ export function InstallPrompt() {
   return (
     <div className="mt-6 flex flex-wrap items-center gap-x-3 gap-y-2 border border-ink/15 bg-paper-deep/40 px-4 py-3 text-xs leading-6 text-ink-soft">
       <span className="min-w-0 flex-1 basis-48">
-        {iosHint ? (
+        {state === 'ios' ? (
           <>
             在 Safari 点「分享」→「添加到主屏幕」，就能把墨痕当应用打开，
             <span className="text-ink">离线也能翻已读过的书</span>。
@@ -102,13 +56,13 @@ export function InstallPrompt() {
           </>
         )}
       </span>
-      {!iosHint && (
+      {state === 'prompt' && (
         <button className={`${btn} border-cinnabar/50 text-cinnabar-deep`} onClick={() => void install()}>
           安装
         </button>
       )}
       <button className={btn} onClick={dismiss}>
-        {iosHint ? '知道了' : '以后再说'}
+        {state === 'prompt' ? '以后再说' : '知道了'}
       </button>
     </div>
   )
