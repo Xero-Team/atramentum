@@ -1,12 +1,14 @@
-// AI 接入类型：BYOK——用户自填端点与密钥，浏览器直连，仅存本机 localStorage
+// AI access types: BYOK — the user supplies the endpoint and key, the browser calls it
+// directly, and both live only in this browser's localStorage
 //
-// Provider 抽象：两类适配器
-// - openai-compatible: 可配置 baseURL + model，覆盖 OpenAI / DeepSeek / 通义 / 智谱
-// - anthropic: Claude，浏览器直连需 anthropic-dangerous-direct-browser-access header
+// Provider abstraction: two adapters
+// - openai-compatible: configurable baseURL + model; covers OpenAI / DeepSeek / Qwen / Zhipu
+// - anthropic: Claude, which needs the anthropic-dangerous-direct-browser-access header
+//   to be called straight from a browser
 
 export type ProviderKind = 'openai-compatible' | 'anthropic'
 
-/** 预置端点（用户也可自定义 baseURL） */
+/** Preset endpoints (the user can set a custom baseURL too) */
 export interface PresetEndpoint {
   id: string
   label: string
@@ -14,7 +16,7 @@ export interface PresetEndpoint {
   baseURL: string
   defaultModel: string
   models: string[]
-  apiKeyURL: string // 引导用户去拿 key 的地址
+  apiKeyURL: string // where to send the user to get a key
 }
 
 export const PRESET_ENDPOINTS: PresetEndpoint[] = [

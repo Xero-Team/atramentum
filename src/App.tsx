@@ -14,9 +14,9 @@ export default function App() {
         <Route path="/c/:courseId" element={<Reader />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
-      {/* AI 著书挂在路由之外：生成中可最小化、可跨页存活，写完的课时可实时预览 */}
+      {/* Write-with-AI lives outside the router: generation can be minimised, survives navigation, and finished lessons are previewable live */}
       {generateOpen && <NewCourseDialog />}
-      {/* 离线外壳有新版本时提示（同样是全局的，在哪一页都能看到） */}
+      {/* Prompt when the offline shell has a new version (global too, so it shows on any page) */}
       <UpdatePrompt />
     </HashRouter>
   )

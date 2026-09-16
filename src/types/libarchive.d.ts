@@ -1,10 +1,10 @@
-// libarchive.js 无官方类型，手写最小声明（仅用到 RAR 解包路径）
+// libarchive.js ships no types, so here is a minimal hand-written declaration (only the RAR unpacking path is used)
 declare module 'libarchive.js' {
   export class Archive {
-    /** 指定 worker-bundle.js 地址（需拷到 public 静态目录；wasm 由 worker 相对自身解析） */
+    /** Where worker-bundle.js lives (it must be copied into the public assets; the worker resolves the wasm relative to itself) */
     static init(options?: { workerUrl?: string }): unknown
     static open(file: File | Blob, options?: unknown): Promise<Archive>
-    /** 解包全部条目，返回嵌套目录树，叶子为 File */
+    /** Unpack every entry into a nested directory tree whose leaves are File objects */
     extractFiles(cb?: (entry: { file: File; path: string }) => void): Promise<Record<string, unknown>>
     hasEncryptedData(): Promise<boolean | null>
     usePassword(password: string): Promise<void>

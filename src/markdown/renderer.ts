@@ -3,13 +3,13 @@ import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js'
 import { resolveRelative } from '../course/structure'
 
-// 仅注册课件常用语言子集，控制 bundle 体积
+// Only the languages courses actually use are registered, to keep the bundle small
 const LANGS = [
   'c', 'cpp', 'rust', 'python', 'javascript', 'typescript', 'java', 'go',
   'bash', 'shell', 'makefile', 'json', 'toml', 'yaml', 'ini', 'x86asm', 'nasm',
   'armasm', 'sql', 'diff', 'markdown', 'plaintext', 'cmake', 'perl', 'lua',
 ]
-// 动态注册到全局 hljs 实例；语言缺失则静默跳过
+// Registered onto the global hljs instance on demand; a missing language is skipped silently
 void Promise.all(
   LANGS.map((lang) =>
     import(`highlight.js/lib/languages/${lang}`)
@@ -19,25 +19,25 @@ void Promise.all(
 )
 
 export interface RenderOptions {
-  /** 当前文件课程内路径，用于解析相对链接 */
+  /** The current file's in-course path, used to resolve relative links */
   filePath: string
-  /** 把课程内 md 路径转为跳转回调（返回 null 表示拦截） */
+  /** Turn an in-course md path into a navigation callback (returning null blocks it) */
   onLink?: (coursePath: string, el: HTMLAnchorElement) => void
-  /** 渲染完 HTML 后的 DOM 后处理钩子（如 heading id） */
+  /** A DOM post-processing hook run after the HTML is rendered (heading ids, say) */
   postProcess?: (root: HTMLElement) => void
 }
 
 const md = new MarkdownIt({
-  html: false, // 课件不可信，一律禁用内联 HTML，走 DOMPurify 之外再上一道保险
+  html: false, // Course content is untrusted: inline HTML is always off, a second line of defence behind DOMPurify
   linkify: false,
   typographer: false,
   breaks: false,
 })
 
 /**
- * fence 规则：
- * - 有语言标注 → highlight.js（未知语言退化为纯 code）
- * - 无语言标注 → ASCII 图：`<pre class="ascii">`，等宽不折行、不染色
+ * Fence rules:
+ * - With a language tag → highlight.js (an unknown language degrades to plain code)
+ * - Without one → an ASCII diagram: `<pre class="ascii">`, monospaced, unwrapped, uncoloured
  */
 md.renderer.rules.fence = (tokens, idx) => {
   const token = tokens[idx]
@@ -62,24 +62,24 @@ md.renderer.rules.fence = (tokens, idx) => {
   return `<pre class="code"><code class="hljs">${content}</code></pre>\n`
 }
 
-// 表格包一层横向滚动容器
+// Wrap tables in a horizontal scroll container
 md.renderer.rules.table_open = () => '<div class="table-wrap"><table>\n'
 md.renderer.rules.table_close = () => '</table></div>\n'
 
-/** 渲染 markdown → 净化后的 HTML 字符串，并处理后处理（链接改写在 DOM 层做） */
+/** Render markdown → sanitised HTML, with post-processing (link rewriting happens at the DOM layer) */
 export function renderMarkdown(text: string): string {
   const raw = md.render(text)
-  // html:false 已拦截大部分注入；块级 HTML 会被转义，无需额外白名单
+  // html:false already blocks most injection; block-level HTML comes through escaped, so no extra allowlist is needed
   return raw
 }
 
-/** 把渲染结果挂到 DOM 并做链接改写 / 外链加固 / 钩子处理，返回根元素 */
+/** Mount the rendered result into the DOM, rewrite links, harden external ones and run the hooks; returns the root element */
 export function mountMarkdown(html: string, opts: RenderOptions): HTMLElement {
   const root = document.createElement('div')
   root.className = 'prose prose-moxue'
   root.innerHTML = html
 
-  // 链接处理
+  // Links
   for (const a of Array.from(root.querySelectorAll('a'))) {
     const href = a.getAttribute('href') ?? ''
     if (!href) continue
@@ -88,14 +88,14 @@ export function mountMarkdown(html: string, opts: RenderOptions): HTMLElement {
       a.setAttribute('rel', 'noreferrer noopener')
       continue
     }
-    if (href.startsWith('#')) continue // 页内锚点
+    if (href.startsWith('#')) continue // an in-page anchor
     const resolved = resolveRelative(opts.filePath, href)
     if (resolved) {
       a.setAttribute('href', resolved)
       a.dataset.courseLink = resolved
       opts.onLink?.(resolved, a)
     } else {
-      // 越出课程根（如 ../os/…）或非 md：拦截 + 提示样式
+      // Outside the course root (../os/…, say) or not markdown: block it and mark it as such
       a.classList.add('link-blocked')
       a.addEventListener('click', (e) => {
         e.preventDefault()
@@ -104,7 +104,7 @@ export function mountMarkdown(html: string, opts: RenderOptions): HTMLElement {
     }
   }
 
-  // heading 锚点 id（用于目录跳转）
+  // Heading anchor ids (for jumping from the table of contents)
   let h2Index = 0
   for (const h of Array.from(root.querySelectorAll('h1, h2, h3'))) {
     if (!h.id) h.id = `h-${opts.filePath.replace(/[^\w]/g, '-')}-${h2Index++}`
@@ -115,9 +115,9 @@ export function mountMarkdown(html: string, opts: RenderOptions): HTMLElement {
 }
 
 /**
- * 渲染并净化（返回字符串版本，供 innerHTML 使用）。
- * 注意：链接改写需要 DOM 操作，因此完整管线走 mountMarkdown；
- * 字符串版只做渲染 + DOMPurify 兜底。
+ * Render and sanitise (the string form, for innerHTML).
+ * Note: link rewriting needs DOM work, so the full pipeline is mountMarkdown;
+ * this string version only renders and runs DOMPurify as a backstop.
  */
 export function renderMarkdownSafe(text: string): string {
   const html = renderMarkdown(text)
