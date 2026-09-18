@@ -87,9 +87,17 @@ async function doSync(options: { forcePush?: boolean }): Promise<SyncSummary> {
   }
 }
 
-/** A concurrent push is not a failure: re-read the branch and plan again against the newer tree */
+/**
+ * A concurrent push is not a failure: re-read the branch and plan again against
+ * the newer tree.
+ *
+ * Only a genuine lost race is worth retrying. A 422 that means "that ref already
+ * exists" or "no such commit" repeats identically on every attempt, so retrying
+ * it three times and then blaming another device sends the user hunting for a
+ * second device that does not exist.
+ */
 async function withRetry(ref: RepoRef, options: { forcePush?: boolean }): Promise<SyncSummary> {
-  let lastError: unknown
+  let lastError: SyncError | null = null
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     try {
       return await attemptOnce(ref, options)
@@ -98,7 +106,7 @@ async function withRetry(ref: RepoRef, options: { forcePush?: boolean }): Promis
       lastError = e
     }
   }
-  throw lastError ?? new SyncError('conflict', 'the branch kept moving under us')
+  throw new SyncError('conflict', lastError?.message ?? 'the branch kept moving under us')
 }
 
 async function attemptOnce(ref: RepoRef, options: { forcePush?: boolean }): Promise<SyncSummary> {

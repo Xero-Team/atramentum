@@ -80,8 +80,13 @@ describe('requests', () => {
   it('treats an empty repository as having no head', async () => {
     respond = () => ({ status: 409, json: { message: 'Git Repository is empty.' } })
     await expect(getHead(ref)).resolves.toBeNull()
+  })
+
+  it('separates "this branch is missing" from "the repository is empty"', async () => {
+    // Folding the two together made the first push try to create a ref that was
+    // already there, fail with a 422, and report it as another device syncing
     respond = () => ({ status: 404, json: { message: 'Not Found' } })
-    await expect(getHead(ref)).resolves.toBeNull()
+    await expect(getHead(ref)).rejects.toMatchObject({ code: 'branchNotFound' })
   })
 
   it('resolves the head commit and its tree', async () => {
@@ -173,6 +178,20 @@ describe('committing', () => {
     await expect(
       commit(ref, { commit: 'C1', tree: 'T1' }, [{ path: 'p', sha: 'B1' }], 'msg'),
     ).rejects.toMatchObject({ code: 'conflict' })
+  })
+
+  it('reports a rejected branch creation as a conflict rather than a bare 422', async () => {
+    // What a repository made with auto_init looks like when the caller thought
+    // it was empty: the ref is already there, so creating it is refused
+    respond = (url) => {
+      if (url.endsWith('/git/trees')) return { json: { sha: 'T1' } }
+      if (url.endsWith('/git/commits')) return { json: { sha: 'C1' } }
+      return { status: 422, json: { message: 'Reference already exists' } }
+    }
+    await expect(commit(ref, null, [{ path: 'p', sha: 'B1' }], 'first')).rejects.toMatchObject({
+      code: 'conflict',
+      message: 'the branch main already exists',
+    })
   })
 })
 

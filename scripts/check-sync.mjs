@@ -183,7 +183,15 @@ function startFakeGitHub(port) {
     }
     if (rest === '/git/refs' && method === 'POST') {
       const body = await readBody(req)
-      repo.refs.set(String(body.ref).replace('refs/heads/', ''), body.sha)
+      const name = String(body.ref).replace('refs/heads/', '')
+      // GitHub rejects creating a ref that already exists. Without this the fake
+      // server is more forgiving than the real one, and the app's "create the
+      // branch on the first push" path would look healthy here while failing on
+      // github.com with a 422.
+      if (repo.refs.has(name)) {
+        return json(res, 422, { message: 'Reference already exists' })
+      }
+      repo.refs.set(name, body.sha)
       return json(res, 201, { ref: body.ref, object: { sha: body.sha } })
     }
     const refWrite = rest.match(/^\/git\/refs\/heads\/(.+)$/)
@@ -779,6 +787,40 @@ try {
     tries: 40,
   }).catch(() => false)
   check('an invalid token is reported rather than silently ignored', badToken === true, await evaluate(a, `document.body.innerText.match(/同步失败[^\\n]*/)?.[0] ?? ''`))
+
+  /* ── Root causes that used to be reported as "another device is syncing" ──
+     Both of these are deterministic: retrying cannot fix them, so blaming a
+     phantom other device sent the user looking in entirely the wrong place. */
+
+  // Restore the good token, then point at a branch that does not exist
+  await evaluate(a, `localStorage.setItem('moxue-sync', localStorage.getItem('moxue-sync').replace('wrong-token', ${JSON.stringify(TOKEN)}))`)
+  await openApp(a)
+  await clickButton(a, '设置')
+  await sleep(400)
+  await clickButton(a, '云同步设置')
+  await sleep(400)
+  await setInput(a, 'input[placeholder="main"]', 'no-such-branch')
+  await clickButton(a, '立即同步')
+  const badBranch = await waitFor(
+    () => evaluate(a, `(() => { const m = document.body.innerText.match(/同步失败[^\\n]*|没有这个分支[^\\n]*/); return m ? m[0] : '' })()`),
+    { label: 'the wrong branch is reported', tries: 60 },
+  )
+  check('a wrong branch name names the branch, not a phantom device', /分支/.test(badBranch), badBranch)
+  check('and never the other-device wording', !/别的设备|another device/i.test(badBranch), badBranch)
+
+  // The branch that already exists: a repository made with auto_init has one, and
+  // our first push must update it rather than try to create it
+  await setInput(a, 'input[placeholder="main"]', 'main')
+  const recovered = await waitFor(
+    () => evaluate(a, `(() => { const m = document.body.innerText.match(/同步完成[^\\n]*|同步失败[^\\n]*/); return m ? m[0] : '' })()`),
+    { label: 'sync works again once the branch is right', tries: 60 },
+  ).catch(() => '')
+  if (!recovered) {
+    await clickButton(a, '立即同步')
+    await waitFor(() => evaluate(a, `/同步完成|同步失败/.test(document.body.innerText)`), { label: 'retry', tries: 60 })
+  }
+  const finalRun = await evaluate(a, `document.body.innerText.match(/同步(完成|失败)[^\\n]*/)?.[0] ?? ''`)
+  check('a repository whose branch already exists syncs instead of 422-ing', /同步完成/.test(finalRun), finalRun)
 
   a.close()
   b.close()

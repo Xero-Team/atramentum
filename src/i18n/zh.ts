@@ -510,7 +510,9 @@ export const zh = {
     errForbidden: '令牌没有这个仓库的读写权限。',
     errRateLimit: 'GitHub 的接口调用次数用完了，过一会儿再试。',
     errNotFound: '找不到这个仓库。确认名字写对了，并且令牌有权访问它。',
-    errConflict: '有别的设备刚好也在同步，重试了几次都没抢过它，稍后再试。',
+    errBranchNotFound: '仓库在，但没有这个分支。把「分支」改成仓库实际用的那个（通常是 main 或 master）。',
+    errConflict:
+      'GitHub 拒绝了一次写入。如果确实有另一台设备在同时同步，稍后再试；否则多半是分支名不对，或令牌没有写入权限。',
     errNetwork: '连不上 GitHub，检查网络后重试。',
     errServer: 'GitHub 那边出错了，稍后再试。',
     errUnknown: '同步失败',

@@ -20,6 +20,8 @@ export type SyncErrorCode =
   | 'forbidden' // 403 — the token may not do this
   | 'rateLimit' // 403 with no quota left
   | 'notFound' // 404 — no such repo, or the token cannot see it
+  /** The repository is there but has no branch by that name */
+  | 'branchNotFound'
   | 'conflict' // 409/422 — an empty repository, or another device pushed first
   | 'network' // fetch itself failed
   | 'server' // 5xx
@@ -172,21 +174,36 @@ export async function createRepo(
 
 /* ───────── Git objects ───────── */
 
-/** The branch head commit plus its tree, or null when the repository has no commits yet */
+/**
+ * The branch head commit plus its tree, or null when there is genuinely nothing
+ * to build on.
+ *
+ * Only a 409 — GitHub's "Git Repository is empty" — counts as that. A 404 on our
+ * branch is *not* the same thing: the repository may well have commits, just not
+ * on the branch we were told to use. Folding the two together sends the caller
+ * down the create-the-ref path, and GitHub rejects `POST /git/refs` for a ref
+ * that already exists — so the first push would fail with a 422 that repeats
+ * identically on every retry, looking for all the world like a lost race.
+ */
 export async function getHead(ref: RepoRef): Promise<{ commit: string; tree: string } | null> {
+  let r: { object?: { sha?: string } }
   try {
-    const r = await request<{ object?: { sha?: string } }>(
+    r = await request<{ object?: { sha?: string } }>(
       ref.token,
       `/repos/${ref.owner}/${ref.repo}/git/ref/heads/${ref.branch}`,
     )
-    const commit = r?.object?.sha
-    if (!commit) throw new SyncError('badResponse', 'the branch ref carried no commit')
-    return { commit, tree: await getCommitTree(ref, commit) }
   } catch (e) {
-    // 404: no such branch. 409: the repository is still empty.
-    if (e instanceof SyncError && (e.code === 'notFound' || e.code === 'conflict')) return null
+    if (e instanceof SyncError && e.code === 'conflict') return null // empty repository
+    // A 404 here means the repository exists but this branch does not — saying
+    // "no such repository" would send the user looking in the wrong place
+    if (e instanceof SyncError && e.code === 'notFound') {
+      throw new SyncError('branchNotFound', `the repository has no branch "${ref.branch}"`, e.status)
+    }
     throw e
   }
+  const commit = r?.object?.sha
+  if (!commit) throw new SyncError('badResponse', 'the branch ref carried no commit')
+  return { commit, tree: await getCommitTree(ref, commit) }
 }
 
 export async function getCommitTree(ref: RepoRef, commit: string): Promise<string> {
@@ -251,11 +268,20 @@ export async function commit(
   if (!commitRes?.sha) throw new SyncError('badResponse', 'the commit was created but no sha came back')
 
   if (!base) {
-    await request(ref.token, `/repos/${ref.owner}/${ref.repo}/git/refs`, {
-      method: 'POST',
-      body: { ref: `refs/heads/${ref.branch}`, sha: commitRes.sha },
-    })
-    return
+    // The first push creates the branch. If it turns out the ref already exists
+    // (a race with another device, or a head we could not read), fall back to the
+    // normal update path rather than failing the whole sync.
+    try {
+      await request(ref.token, `/repos/${ref.owner}/${ref.repo}/git/refs`, {
+        method: 'POST',
+        body: { ref: `refs/heads/${ref.branch}`, sha: commitRes.sha },
+      })
+      return
+    } catch (e) {
+      if (!(e instanceof SyncError) || e.code !== 'conflict') throw e
+      // Someone got there first; the caller re-reads and re-plans
+      throw new SyncError('conflict', `the branch ${ref.branch} already exists`, e.status)
+    }
   }
   await request(ref.token, `/repos/${ref.owner}/${ref.repo}/git/refs/heads/${ref.branch}`, {
     method: 'PATCH',

@@ -508,7 +508,10 @@ export const en: Dict = {
     errForbidden: 'The token may not read and write this repository.',
     errRateLimit: 'GitHub’s rate limit is used up — try again in a little while.',
     errNotFound: 'No such repository. Check the name, and that the token can see it.',
-    errConflict: 'Another device was syncing at the same time and won every retry. Try again shortly.',
+    errBranchNotFound:
+      'The repository is there, but it has no such branch. Set “Branch” to the one it actually uses (usually main or master).',
+    errConflict:
+      'GitHub refused a write. If another device really was syncing at the same time, try again shortly; otherwise it is most likely a wrong branch name or a token without write access.',
     errNetwork: 'Could not reach GitHub. Check your connection and try again.',
     errServer: 'GitHub returned an error. Try again later.',
     errUnknown: 'Sync failed',

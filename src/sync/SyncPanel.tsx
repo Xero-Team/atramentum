@@ -269,6 +269,7 @@ export function SyncPanel() {
             <label className="mb-1 block text-xs text-ink-faint">{t.sync.branch}</label>
             <input
               className={`${inputCls} w-32`}
+              placeholder="main"
               value={branch}
               onChange={(e) => setConfig({ branch: e.target.value.trim() })}
               spellCheck={false}

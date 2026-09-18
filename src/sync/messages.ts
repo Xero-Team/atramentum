@@ -23,6 +23,8 @@ export function errorText(t: Dict, code: SyncErrorCode | 'unknown', detail: stri
       return t.sync.errRateLimit
     case 'notFound':
       return t.sync.errNotFound
+    case 'branchNotFound':
+      return `${t.sync.errBranchNotFound}${detail ? `（${detail}）` : ''}`
     case 'conflict':
       return t.sync.errConflict
     case 'network':
