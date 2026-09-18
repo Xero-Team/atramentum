@@ -91,10 +91,12 @@ async function doSync(options: { forcePush?: boolean }): Promise<SyncSummary> {
  * A concurrent push is not a failure: re-read the branch and plan again against
  * the newer tree.
  *
- * Only a genuine lost race is worth retrying. A 422 that means "that ref already
- * exists" or "no such commit" repeats identically on every attempt, so retrying
- * it three times and then blaming another device sends the user hunting for a
- * second device that does not exist.
+ * Only a genuine lost race is worth retrying, and the API does not say which
+ * kind of 422 it sent. What we can do is refuse to report a cause we cannot
+ * know: if every attempt failed the same way, the message is handed through
+ * as-is rather than dressed up as "another device beat us" — which is what sent
+ * a user hunting for a phantom second device while the real problem was a
+ * branch that did not exist.
  */
 async function withRetry(ref: RepoRef, options: { forcePush?: boolean }): Promise<SyncSummary> {
   let lastError: SyncError | null = null

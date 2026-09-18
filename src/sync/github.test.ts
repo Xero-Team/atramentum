@@ -87,11 +87,22 @@ describe('requests', () => {
     await expect(canWrite(ref)).resolves.toBe(false)
   })
 
-  it('creates a private repository with an initial commit', async () => {
+  it('creates a private repository, leaving it empty on purpose', async () => {
     respond = () => ({ json: { name: 'r', owner: { login: 'me' }, default_branch: 'main' } })
     await expect(createRepo('tok', 'r', 'desc')).resolves.toEqual({ owner: 'me', repo: 'r', defaultBranch: 'main' })
     expect(calls[0]).toMatchObject({ url: 'https://api.github.com/user/repos', method: 'POST' })
-    expect(calls[0].body).toEqual({ name: 'r', private: true, auto_init: true, description: 'desc' })
+    // No auto_init: it finishes asynchronously, so the branch it promises may not
+    // exist when the first sync runs. The first push creates the branch instead.
+    expect(calls[0].body).toEqual({ name: 'r', private: true, description: 'desc' })
+  })
+
+  it('names the branch to use even when the repository has none yet', async () => {
+    // GitHub still reports a default_branch for an empty repository
+    respond = () => ({ json: { name: 'r', owner: { login: 'me' }, default_branch: 'trunk' } })
+    await expect(createRepo('tok', 'r', 'd')).resolves.toMatchObject({ defaultBranch: 'trunk' })
+    // ...but if it ever omits it, we must not end up with an empty branch name
+    respond = () => ({ json: { name: 'r', owner: { login: 'me' } } })
+    await expect(createRepo('tok', 'r', 'd')).resolves.toMatchObject({ defaultBranch: 'main' })
   })
 
   it('treats an empty repository as having no head', async () => {

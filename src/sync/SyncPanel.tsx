@@ -119,8 +119,10 @@ export function SyncPanel() {
     try {
       const login = await getUser(tk)
       const made = await createRepo(tk, name, t.sync.title)
-      setConfig({ owner: made.owner || login, repo: made.repo, branch: made.defaultBranch })
-      setNotice({ ok: true, text: t.sync.connected(made.owner || login) })
+      const owner = made.owner || login
+      setConfig({ owner, repo: made.repo, branch: made.defaultBranch })
+      // A brand-new repository has no branch until the first push creates one
+      setNotice({ ok: true, text: t.sync.repoCreated(`${owner}/${made.repo}`) })
     } catch (e) {
       setNotice({
         ok: false,

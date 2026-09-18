@@ -465,6 +465,8 @@ export const zh = {
     connect: '连接',
     connecting: '连接中……',
     connected: (full: string) => `已连接：${full}`,
+    repoCreated: (full: string) =>
+      `已创建并连接：${full}。仓库现在是空的，第一次同步会自动建好分支。`,
     connectedReadOnly: (full: string) =>
       `已连接：${full}，但这个令牌**没有写入权限**，只能拉取不能上传。细粒度令牌请把 Contents 改成 Read and write（改完要重新生成令牌）。`,
     needToken: '先填访问令牌。',

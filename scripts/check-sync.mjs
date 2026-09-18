@@ -70,7 +70,7 @@ function blobSha(text) {
     .digest('hex')
 }
 
-function newRepo() {
+function newRepo(initialised = false) {
   const repo = {
     blobs: new Map(),
     allBlobs: new Set(),
@@ -79,15 +79,20 @@ function newRepo() {
     refs: new Map(),
     counter: 0,
   }
-  // What auto_init leaves behind: a branch that exists, over an empty tree
-  repo.trees.set('tree-0', [])
-  repo.commits.set('commit-0', { tree: 'tree-0', parents: [] })
-  repo.refs.set(BRANCH, 'commit-0')
+  if (initialised) {
+    // What auto_init eventually leaves behind: a branch over an empty tree. It
+    // has to be opt-in, because auto_init is *asynchronous* on GitHub — a repo
+    // created without it starts with no commits and no branch at all, and that
+    // is the state the first push has to cope with.
+    repo.trees.set('tree-0', [])
+    repo.commits.set('commit-0', { tree: 'tree-0', parents: [] })
+    repo.refs.set(BRANCH, 'commit-0')
+  }
   return repo
 }
 
 function startFakeGitHub(port) {
-  const state = { repos: new Map(), commits: 0, requests: 0, readOnlyToken: false }
+  const state = { repos: new Map(), commits: 0, requests: 0, readOnlyToken: false, autoInitLands: null }
 
   const cors = {
     'Access-Control-Allow-Origin': '*',
@@ -144,6 +149,7 @@ function startFakeGitHub(port) {
       state.repos.clear()
       state.commits = 0
       state.readOnlyToken = false
+      state.autoInitLands = null
       return json(res, 200, { ok: true })
     }
     if (path === '/__readonly' && method === 'POST') {
@@ -171,7 +177,19 @@ function startFakeGitHub(port) {
       if (state.denyCreate) {
         return json(res, 403, { message: 'Resource not accessible by personal access token' })
       }
-      state.repos.set(`${OWNER}/${body.name}`, newRepo())
+      // Honour auto_init the way GitHub does, including the fact that it is not
+      // finished when this response goes out: the repository is created empty,
+      // and the initial commit only appears once `state.autoInitLands` is set.
+      const repo = newRepo(false)
+      state.repos.set(`${OWNER}/${body.name}`, repo)
+      if (body.auto_init === true) {
+        state.autoInitLands = () => {
+          repo.trees.set('tree-0', [])
+          repo.commits.set('commit-0', { tree: 'tree-0', parents: [] })
+          repo.refs.set(BRANCH, 'commit-0')
+        }
+      }
+      // GitHub reports a default branch whether or not it exists yet
       return json(res, 201, { name: body.name, owner: { login: OWNER }, default_branch: BRANCH })
     }
 
@@ -189,8 +207,24 @@ function startFakeGitHub(port) {
     /* ── Refs ── */
     const refRead = rest.match(/^\/git\/ref\/heads\/(.+)$/)
     if (refRead && method === 'GET') {
+      // auto_init finishing between the create and this read is the race the app
+      // has to survive: the branch appears *after* we were told the repo was
+      // empty. Landing it here is the tightest reproduction of that window.
+      if (state.autoInitLands) {
+        state.autoInitLands()
+        state.autoInitLands = null
+      }
       const sha = repo.refs.get(refRead[1])
-      if (!sha) return json(res, 404, { message: 'Not Found' })
+      if (!sha) {
+        // GitHub distinguishes these: 409 when the repository has no commits at
+        // all, 404 when there are commits but not on this branch. The app has to
+        // tell them apart — the first means "create the branch", the second means
+        // "you named the wrong branch".
+        const empty = repo.commits.size === 0
+        return empty
+          ? json(res, 409, { message: 'Git Repository is empty.' })
+          : json(res, 404, { message: 'Not Found' })
+      }
       return json(res, 200, { object: { sha } })
     }
     if (rest === '/git/refs' && method === 'POST') {
@@ -636,13 +670,29 @@ try {
   }).catch(() => false)
   check('creating a private repository from the dialog works', connected === true)
   check('the repository really exists on the server', (await adminState(API_PORT)).repos.includes(`${OWNER}/${REPO}`))
+  // Nothing is created with auto_init, so at this point the repository has no
+  // commits and no branch. The first sync has to create the branch itself —
+  // this is the state that used to fail with a 422 reported as a lost race.
+  check('the new repository starts with no branch at all', (await adminState(API_PORT)).ref === null)
 
-  await clickButton(a, '立即同步')
-  const firstSync = await waitFor(() => evaluate(a, `/同步完成|同步失败/.test(document.body.innerText)`), {
-    label: 'the first sync finished',
-    tries: 80,
-  }).catch(() => false)
-  check('the first sync reports success', firstSync === true, await evaluate(a, `document.body.innerText.match(/同步(完成|失败)[^\\n]*/)?.[0] ?? ''`))
+  const pressed = await clickButton(a, '立即同步')
+  if (!pressed) {
+    const labels = await evaluate(a, `JSON.stringify([...document.querySelectorAll('button')].map(b => b.textContent.trim()))`)
+    throw new Error(`no "立即同步" button to press; buttons: ${labels}`)
+  }
+  const firstRun = await waitFor(
+    () =>
+      evaluate(a, `(() => { const m = document.body.innerText.match(/同步(完成|失败)[^\\n]*/); return m ? m[0] : '' })()`),
+    { label: 'the first sync finished', tries: 80 },
+  ).catch(async () => {
+    const seen = await evaluate(a, `document.body.innerText.replace(/\\n+/g, ' | ').slice(0, 400)`)
+    throw new Error(`no outcome shown; panel said: ${seen}`)
+  })
+  check('the first sync reports success', /同步完成/.test(firstRun), firstRun)
+  check(
+    'and it says nothing about another device',
+    !/别的设备|another device/i.test(await evaluate(a, `document.body.innerText`)),
+  )
 
   const afterFirst = await github.tree()
   const coursePath = `moxue/courses/${course.id}.json`

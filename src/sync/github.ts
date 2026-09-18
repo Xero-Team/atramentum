@@ -193,8 +193,17 @@ export async function createRepo(
 ): Promise<{ owner: string; repo: string; defaultBranch: string }> {
   const r = await request<{ name?: string; owner?: { login?: string }; default_branch?: string }>(token, '/user/repos', {
     method: 'POST',
-    // auto_init gives us a first commit, so a branch exists and the tree API has a base
-    body: { name, private: true, auto_init: true, description },
+    // No `auto_init`. It reads like the safe choice — "give us a first commit so
+    // there is a branch to base a tree on" — but GitHub finishes it
+    // asynchronously, so right after this call the repository can report a
+    // default branch that does not exist yet. The first sync then sees an empty
+    // repository, decides to create the branch, and by the time it does,
+    // auto_init has landed and the ref is already there: a 422 that repeats
+    // identically and looks for all the world like a lost race.
+    //
+    // An empty repository is the case the first push already handles: it creates
+    // the branch itself.
+    body: { name, private: true, description },
   })
   if (!r?.name || !r.owner?.login) throw new SyncError('badResponse', 'the repository was created but not returned')
   return { owner: r.owner.login, repo: r.name, defaultBranch: r.default_branch ?? 'main' }

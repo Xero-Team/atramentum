@@ -457,6 +457,8 @@ export const en: Dict = {
     connect: 'Connect',
     connecting: 'Connecting…',
     connected: (full: string) => `Connected: ${full}`,
+    repoCreated: (full: string) =>
+      `Created and connected: ${full}. The repository is empty right now; the first sync creates the branch.`,
     connectedReadOnly: (full: string) =>
       `Connected: ${full} — but this token has no write access, so it can only pull, never upload. For a fine-grained token, set Contents to Read and write (and regenerate the token; changing the permission alone does not take effect).`,
     needToken: 'Enter an access token first.',
