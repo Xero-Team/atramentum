@@ -14,6 +14,16 @@ import { tr } from '../i18n'
 
 export interface StoredCourse extends CourseMeta {
   createdAt: number
+  /**
+   * When this record last changed. Kept out of CourseMeta (it is storage
+   * bookkeeping, like createdAt) and out of the indexes, so adding it was not a
+   * schema change. Cloud sync reads it to tell "the user edited this locally"
+   * from "nothing happened since the last sync".
+   *
+   * Every write path below has to bump it — a path that forgets to leaves the
+   * book looking untouched and the edit never reaches the cloud.
+   */
+  updatedAt: number
   /** The lesson-plan skeleton (a Write-with-AI artefact; used to restore the full plan when continuing, and never shown in the reading tree) */
   plan?: StoredPlan
 }
@@ -37,6 +47,8 @@ class MoxueDB extends Dexie {
   /** Highlights and Q&A conversations: persisted with the course and exportable/importable (books included) */
   annotations!: Table<StoredAnnotation, string>
   threads!: Table<StoredThread, string>
+  /** Key/value odds and ends — currently cloud sync's bookkeeping, which grows with the library and has no business in localStorage */
+  meta!: Table<StoredMeta, string>
 
   constructor() {
     super('moxue')
@@ -51,7 +63,28 @@ class MoxueDB extends Dexie {
       annotations: 'id, courseId, [courseId+path], path, createdAt',
       threads: 'id, courseId, [courseId+path], nonce, createdAt',
     })
+    // v3 adds one index to each of the two note tables: [courseId+updatedAt], so
+    // sync can ask "when did this book's notes last change?" without loading the
+    // conversations (they carry whole lessons as agent context and get big).
+    this.version(3).stores({
+      courses: 'id, source, createdAt',
+      files: '[courseId+path], courseId',
+      annotations: 'id, courseId, [courseId+path], path, createdAt, updatedAt, [courseId+updatedAt]',
+      threads: 'id, courseId, [courseId+path], nonce, createdAt, updatedAt, [courseId+updatedAt]',
+    })
+    this.version(4).stores({
+      courses: 'id, source, createdAt',
+      files: '[courseId+path], courseId',
+      annotations: 'id, courseId, [courseId+path], path, createdAt, updatedAt, [courseId+updatedAt]',
+      threads: 'id, courseId, [courseId+path], nonce, createdAt, updatedAt, [courseId+updatedAt]',
+      meta: 'key',
+    })
   }
+}
+
+export interface StoredMeta {
+  key: string
+  value: unknown
 }
 
 export type StoredAnnotation = Annotation
@@ -73,13 +106,18 @@ function withDefaults(meta: CourseMeta): CourseMeta {
   return { ...meta, category: meta.category || '学习', format: meta.format || 'md' }
 }
 
+/** Drop the storage-layer fields; what is left is exactly one CourseMeta (plan included: it is restored through loadCoursePlan) */
+function toMeta(rec: StoredCourse): CourseMeta {
+  const { createdAt: _createdAt, updatedAt: _updatedAt, plan: _plan, ...meta } = rec
+  return withDefaults(meta)
+}
+
 function makeDbStore(source: CourseMeta['source']): CourseStore {
   return {
     async list() {
       // imported and generated share one table, so it must be filtered by source — otherwise every course shows up twice on the shelf
       const all = await db.courses.where('source').equals(source).toArray()
-      // createdAt is a storage-layer field and stays out of CourseMeta
-      return all.map(({ createdAt: _createdAt, ...meta }) => withDefaults(meta))
+      return all.map(toMeta)
     },
 
     loadTree(id) {
@@ -89,8 +127,7 @@ function makeDbStore(source: CourseMeta['source']): CourseStore {
           (async () => {
             const meta = await db.courses.get(id)
             if (!meta) return null
-            const { createdAt: _createdAt, ...pure } = meta
-            return buildTree(withDefaults(pure), (p) => db.files.get([id, p]).then((f) => f?.text ?? null))
+            return buildTree(toMeta(meta), (p) => db.files.get([id, p]).then((f) => f?.text ?? null))
           })(),
         )
       treeCache.get(id)!.catch(() => treeCache.delete(id))
@@ -123,16 +160,24 @@ export async function assertQuota(neededBytes: number): Promise<void> {
   }
 }
 
-/** Store a whole course (overwriting any files under the same id); files are normalised posix relative paths; plan is an optional lesson-plan skeleton */
+/**
+ * Store a whole course (overwriting any files under the same id); files are
+ * normalised posix relative paths; plan is an optional lesson-plan skeleton.
+ *
+ * `updatedAt` is normally "now", but cloud sync passes the timestamp the copy
+ * came with: stamping a pulled book with the local clock would make it look
+ * edited the moment it lands, and the next sync would push it straight back.
+ */
 export async function saveCourse(
   meta: CourseMeta,
   files: { path: string; text: string }[],
   createdAt = Date.now(),
   plan?: StoredPlan,
+  updatedAt = createdAt,
 ): Promise<void> {
   await assertQuota(files.reduce((n, f) => n + f.text.length * 2, 0) /* rough UTF-16 estimate */)
   await db.transaction('rw', db.courses, db.files, async () => {
-    await db.courses.put({ ...meta, createdAt, plan })
+    await db.courses.put({ ...meta, createdAt, updatedAt, plan })
     await db.files.where('courseId').equals(meta.id).delete()
     await db.files.bulkPut(files.map((f) => ({ courseId: meta.id, path: f.path, text: f.text })))
   })
@@ -143,14 +188,14 @@ export async function saveCourse(
  *  INDEX go in first, then each lesson file as it lands). The plan is stored too,
  *  so a record left behind by closing the browser can be fully restored by a continuation. */
 export async function createCourseRecord(meta: CourseMeta, plan?: StoredPlan, createdAt = Date.now()): Promise<void> {
-  await db.courses.put({ ...meta, createdAt, plan })
+  await db.courses.put({ ...meta, createdAt, updatedAt: createdAt, plan })
   await db.files.where('courseId').equals(meta.id).delete()
   invalidateTree(meta.id)
 }
 
 /** Write the lesson-plan skeleton back on its own (files and the tree are untouched; the first store goes through ingestCourse and this is written after) */
 export async function saveCoursePlan(courseId: string, plan: StoredPlan): Promise<void> {
-  await db.courses.update(courseId, { plan })
+  await db.courses.update(courseId, { plan, updatedAt: Date.now() })
 }
 
 /** Read the lesson-plan skeleton (only imported/generated keep one on the record; undefined when there is none) */
@@ -174,7 +219,7 @@ export async function deleteCourse(id: string): Promise<void> {
 export async function renameCourse(id: string, title: string): Promise<void> {
   const name = title.trim()
   if (!name) throw new Error(tr().course.titleRequired)
-  await db.courses.update(id, { title: name, seal: [...name][0] || name[0] })
+  await db.courses.update(id, { title: name, seal: [...name][0] || name[0], updatedAt: Date.now() })
   invalidateTree(id)
 }
 
@@ -185,19 +230,26 @@ export async function renameCourse(id: string, title: string): Promise<void> {
  *  the list stuck at ['INDEX.md'], the book is misread as a single-file course, the
  *  finished lessons never reach the tree, and a "path not in tree → jump to the first
  *  section" redirect drags the reader away — until finalize overwrites everything. */
-export async function updateCourseFile(courseId: string, path: string, text: string): Promise<CourseMeta | null> {  let fresh: CourseMeta | null = null
+export async function updateCourseFile(courseId: string, path: string, text: string): Promise<CourseMeta | null> {
+  let fresh: CourseMeta | null = null
+  let added = false
   await db.transaction('rw', db.courses, db.files, async () => {
     await db.files.put({ courseId, path, text })
     const rec = await db.courses.get(courseId)
     if (rec) {
       const files = Array.isArray(rec.files) ? rec.files : []
-      const added = !files.includes(path)
+      added = !files.includes(path)
+      const updatedAt = Date.now()
       if (added) {
-        await db.courses.update(courseId, { files: [...files, path], fileCount: files.length + 1 })
+        await db.courses.update(courseId, { files: [...files, path], fileCount: files.length + 1, updatedAt })
+      } else {
+        await db.courses.update(courseId, { updatedAt })
       }
-      const { createdAt: _createdAt, plan: _plan, ...meta } = rec
       // The returned meta must include the path just appended (rec is a pre-update snapshot and would be one file short)
-      fresh = added ? { ...meta, files: [...files, path], fileCount: files.length + 1 } : meta
+      const { createdAt: _createdAt, updatedAt: _updatedAt, plan: _plan, ...meta } = rec
+      fresh = added
+        ? withDefaults({ ...meta, files: [...files, path], fileCount: files.length + 1 })
+        : withDefaults(meta)
     }
   })
   invalidateTree(courseId)
@@ -273,5 +325,95 @@ export async function bulkPutNotes(annotations: Annotation[], threads: AskThread
     if (annotations.length) await db.annotations.bulkPut(annotations)
     if (threads.length) await db.threads.bulkPut(threads)
   })
+}
+
+/* ───────── For cloud sync ───────── */
+
+/** One stored course with its storage stamps (what sync compares against the cloud) */
+export interface CourseRecord {
+  meta: CourseMeta
+  createdAt: number
+  updatedAt: number
+}
+
+/** Every locally stored course (imported and generated share the table) */
+export async function listCourseRecords(): Promise<CourseRecord[]> {
+  const all = await db.courses.toArray()
+  return all.map((rec) => ({ meta: toMeta(rec), createdAt: rec.createdAt, updatedAt: rec.updatedAt ?? rec.createdAt }))
+}
+
+/** Read one stored course including its plan and stamps (null when the record is gone) */
+export async function readCourseRecord(courseId: string): Promise<(CourseRecord & { plan?: StoredPlan }) | null> {
+  const rec = await db.courses.get(courseId)
+  if (!rec) return null
+  return {
+    meta: toMeta(rec),
+    createdAt: rec.createdAt,
+    // Records written before updatedAt existed fall back to createdAt: never newer than the truth, so a stale book is treated as changed rather than as clean
+    updatedAt: rec.updatedAt ?? rec.createdAt,
+    plan: rec.plan,
+  }
+}
+
+/** Every file of a course as text, in the order the meta lists them */
+export async function readCourseFiles(courseId: string): Promise<{ path: string; text: string }[]> {
+  const rec = await db.courses.get(courseId)
+  const rows = await db.files.where('courseId').equals(courseId).toArray()
+  const byPath = new Map(rows.map((r) => [r.path, r.text]))
+  const listed = (rec?.files ?? []).filter((p) => byPath.has(p))
+  // Anything in the table but not on the record still belongs to the book; appending it keeps a half-written record from losing content
+  const extra = rows.map((r) => r.path).filter((p) => !listed.includes(p))
+  return [...listed, ...extra].map((path) => ({ path, text: byPath.get(path)! }))
+}
+
+/** When a course's highlights and conversations last changed (0 when it has none) */
+export async function notesStamp(courseId: string): Promise<number> {
+  // A compound-index range rather than a courseId scan: threads carry whole
+  // lessons as agent context, so loading them just to read a timestamp is out.
+  // updatedAt is an epoch in milliseconds, so 0 is a safe lower bound.
+  const [a, t] = await Promise.all([
+    db.annotations.where('[courseId+updatedAt]').between([courseId, 0], [courseId, Infinity]).last(),
+    db.threads.where('[courseId+updatedAt]').between([courseId, 0], [courseId, Infinity]).last(),
+  ])
+  return Math.max(a?.updatedAt ?? 0, t?.updatedAt ?? 0)
+}
+
+/** Every course id carrying highlights or conversations (built-in courses included: their ids come from the manifest and are stable across devices) */
+export async function noteCourseIds(): Promise<string[]> {
+  const [a, t] = await Promise.all([
+    db.annotations.orderBy('courseId').uniqueKeys(),
+    db.threads.orderBy('courseId').uniqueKeys(),
+  ])
+  return [...new Set([...a, ...t].map(String))]
+}
+
+/** Read a course's highlights and conversations (what sync merges against the cloud) */
+export async function readNotes(courseId: string): Promise<{ annotations: Annotation[]; threads: AskThread[] }> {
+  const [annotations, threads] = await Promise.all([listAnnotations(courseId), listThreads(courseId)])
+  return { annotations, threads }
+}
+
+/** Overwrite a course's highlights and conversations wholesale (applying a merged set pulled from the cloud) */
+export async function replaceNotes(courseId: string, annotations: Annotation[], threads: AskThread[]): Promise<void> {
+  await db.transaction('rw', db.annotations, db.threads, async () => {
+    await db.annotations.where('courseId').equals(courseId).delete()
+    await db.threads.where('courseId').equals(courseId).delete()
+    if (annotations.length) await db.annotations.bulkPut(annotations)
+    if (threads.length) await db.threads.bulkPut(threads)
+  })
+}
+
+/** Read a key/value blob (cloud sync's bookkeeping); undefined when absent */
+export async function readMeta<T>(key: string): Promise<T | undefined> {
+  const row = await db.meta.get(key)
+  return row?.value as T | undefined
+}
+
+export async function writeMeta(key: string, value: unknown): Promise<void> {
+  await db.meta.put({ key, value })
+}
+
+export async function deleteMeta(key: string): Promise<void> {
+  await db.meta.delete(key)
 }
 
