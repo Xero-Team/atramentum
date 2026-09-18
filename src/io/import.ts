@@ -90,9 +90,18 @@ export async function fromFiles(items: File[] | DataTransferItemList): Promise<R
 
   if (items instanceof DataTransferItemList) {
     const entries: FileSystemEntry[] = []
+    const entryless: File[] = []
     for (let i = 0; i < items.length; i++) {
-      const entry = items[i].webkitGetAsEntry()
+      const entry = items[i].webkitGetAsEntry?.()
       if (entry) entries.push(entry)
+      else {
+        // Not every drag source offers an entry: files dragged in from another
+        // application, and anything a script put on the list itself, have only
+        // the File. Without this fallback they would be dropped on the floor and
+        // the import would report "no usable course files".
+        const file = items[i].getAsFile?.()
+        if (file) entryless.push(file)
+      }
     }
     const walkEntry = async (entry: FileSystemEntry, prefix: string): Promise<void> => {
       if (entry.isFile) {
@@ -113,6 +122,9 @@ export async function fromFiles(items: File[] | DataTransferItemList): Promise<R
       }
     }
     for (const e of entries) await walkEntry(e, '')
+    // webkitRelativePath is set when the list came from a directory picker; it is
+    // the only remaining hint at the folder layout for an entry-less file
+    for (const f of entryless) await readFile(f, f.webkitRelativePath || f.name)
     return out
   }
 

@@ -38,9 +38,11 @@ export function ImportDialog({ onClose, onImported }: { onClose: () => void; onI
   const [category, setCategory] = useState('')
   const categories = useCategoryStore((s) => s.order)
   const assignTo = useCategoryStore((s) => s.assignTo)
-  // Title: guessed from the chosen file/folder name and editable; a book (epub/pdf)
+  // Title: prefilled from the chosen file/folder name and editable; a book (epub/pdf)
   // with its own title has it overwritten by that backend
   const [title, setTitle] = useState('')
+  /** Set as soon as the user types in the title box, so our prefill never talks over them */
+  const [titleTouched, setTitleTouched] = useState(false)
   const zipInputRef = useRef<HTMLInputElement>(null)
   const dirInputRef = useRef<HTMLInputElement>(null)
   // The notes file pulled out of this import (if any), restored onto the book once it is stored
@@ -60,6 +62,19 @@ export function ImportDialog({ onClose, onImported }: { onClose: () => void; onI
     } catch (e) {
       return t.importDlg.restoreFailed((e as Error).message)
     }
+  }
+
+  /**
+   * Fill the title box with what we can guess before the user picks anything, and
+   * use the current value on import — the answers are indistinguishable, and this
+   * way what the box shows is always what the book gets called. (`ingestRaw`
+   * still prefers a name guessed from the files themselves: a folder import that
+   * matches its folder name is what the user meant, whatever the box says.)
+   */
+  const prefillTitle = (files: { path: string; data: Uint8Array }[]) => {
+    if (titleTouched) return
+    const guess = files.length ? guessCourseTitle(files) : ''
+    if (guess) setTitle(guess)
   }
 
   const run = async (ingest: IngestFn) => {
@@ -150,7 +165,10 @@ export function ImportDialog({ onClose, onImported }: { onClose: () => void; onI
               className={inputCls}
               placeholder={t.importDlg.namePlaceholder}
               value={title}
-              onChange={(e) => setTitle(e.target.value)}
+              onChange={(e) => {
+                setTitleTouched(true)
+                setTitle(e.target.value)
+              }}
               disabled={busy}
             />
           </div>
@@ -224,7 +242,7 @@ export function ImportDialog({ onClose, onImported }: { onClose: () => void; onI
               setMsg(t.importDlg.wrongFileType)
               return
             }
-            if (!title.trim()) setTitle(guessCourseTitle([{ path: file.name, data: new Uint8Array(0) }]))
+            prefillTitle([{ path: file.name, data: new Uint8Array(0) }])
             void run(ingestArchiveOrBook(file))
           }}
         />
@@ -238,7 +256,7 @@ export function ImportDialog({ onClose, onImported }: { onClose: () => void; onI
             const files = Array.from(e.target.files ?? [])
             e.target.value = ''
             if (files.length === 0) return
-            if (!title.trim()) setTitle(guessCourseTitle(files.map((f) => ({ path: f.webkitRelativePath || f.name, data: new Uint8Array(0) }))))
+            prefillTitle(files.map((f) => ({ path: f.webkitRelativePath || f.name, data: new Uint8Array(0) })))
             void run(async (titleArg) => ingestRaw(await fromFiles(files), titleArg))
           }}
         />
