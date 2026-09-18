@@ -87,7 +87,7 @@ function newRepo() {
 }
 
 function startFakeGitHub(port) {
-  const state = { repos: new Map(), commits: 0, requests: 0 }
+  const state = { repos: new Map(), commits: 0, requests: 0, readOnlyToken: false }
 
   const cors = {
     'Access-Control-Allow-Origin': '*',
@@ -143,11 +143,23 @@ function startFakeGitHub(port) {
     if (path === '/__reset' && method === 'POST') {
       state.repos.clear()
       state.commits = 0
+      state.readOnlyToken = false
       return json(res, 200, { ok: true })
+    }
+    if (path === '/__readonly' && method === 'POST') {
+      state.readOnlyToken = (await readBody(req)).on === true
+      return json(res, 200, { readOnlyToken: state.readOnlyToken })
     }
 
     if (req.headers.authorization !== `Bearer ${TOKEN}`) {
       return json(res, 401, { message: 'Bad credentials' })
+    }
+
+    // A token that may see the repository but not write to it — what a
+    // fine-grained token with Contents set to read-only looks like. Anything
+    // that would change the repository is refused, reads carry on working.
+    if (state.readOnlyToken && method !== 'GET' && path !== '/user/repos') {
+      return json(res, 403, { message: 'Resource not accessible by personal access token' })
     }
 
     if (path === '/user' && method === 'GET') return json(res, 200, { login: OWNER })
@@ -821,6 +833,36 @@ try {
   }
   const finalRun = await evaluate(a, `document.body.innerText.match(/同步(完成|失败)[^\\n]*/)?.[0] ?? ''`)
   check('a repository whose branch already exists syncs instead of 422-ing', /同步完成/.test(finalRun), finalRun)
+
+  /* ── A read-only token is caught at connect time, not at the first upload ──
+     This is the case that used to look connected and then fail at the first
+     blob with a bare 403: `permissions.push` comes back true even for a
+     fine-grained token whose Contents permission is read-only. */
+  await fetch(`http://127.0.0.1:${API_PORT}/__readonly`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ on: true }),
+  })
+  await clickButton(a, '连接')
+  const roNotice = await waitFor(
+    () =>
+      evaluate(
+        a,
+        `(() => {
+          const m = document.body.innerText.match(/已连接[^\\n]*|同步失败[^\\n]*/)
+          return m ? m[0] : ''
+        })()`,
+      ),
+    { label: 'the read-only token is reported', tries: 40 },
+  )
+  check('a token without write access is reported as read-only, not as success', /没有写入权限/.test(roNotice), roNotice)
+  check('and it names the permission to change', /Contents/.test(roNotice), roNotice)
+
+  await fetch(`http://127.0.0.1:${API_PORT}/__readonly`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ on: false }),
+  })
 
   a.close()
   b.close()

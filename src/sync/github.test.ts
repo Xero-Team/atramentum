@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   SyncError,
   base64ToText,
+  canWrite,
   commit,
   createRepo,
   getHead,
@@ -68,6 +69,22 @@ describe('requests', () => {
   it('reads the default branch and whether the token can push', async () => {
     respond = () => ({ json: { default_branch: 'trunk', permissions: { push: false } } })
     await expect(getRepo('tok', 'me', 'r')).resolves.toEqual({ defaultBranch: 'trunk', canPush: false })
+  })
+
+  it('checks write access against a write endpoint, not the repository payload', async () => {
+    // `permissions.push` reports true for a fine-grained token whose Contents
+    // permission is read-only, so the only honest test is a real write call —
+    // and the cheapest one that leaves nothing behind is an empty tree
+    respond = () => ({ json: { sha: 'T1' } })
+    await expect(canWrite(ref)).resolves.toBe(true)
+    expect(calls[0]).toMatchObject({ method: 'POST' })
+    expect(calls[0].url).toBe('https://api.github.com/repos/me/moxue-sync/git/trees')
+    expect(calls[0].body).toEqual({ tree: [] })
+  })
+
+  it('reports a read-only token as such', async () => {
+    respond = () => ({ status: 403, json: { message: 'Resource not accessible by personal access token' } })
+    await expect(canWrite(ref)).resolves.toBe(false)
   })
 
   it('creates a private repository with an initial commit', async () => {

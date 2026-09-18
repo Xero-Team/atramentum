@@ -440,7 +440,7 @@ export const en: Dict = {
     token: 'Access token',
     tokenPlaceholder: 'github_pat_… or ghp_…',
     tokenHint:
-      'A token that can read and write that repository (a fine-grained token needs Contents read and write). It is stored on this device only — never uploaded, and never written into an exported file.',
+      'A token that can read and write that repository. Fine-grained: pick the repository under Repository access, then Permissions → Repository permissions → Contents = Read and write (nothing else is needed). Classic: tick “repo”. The token is stored on this device only — never uploaded, and never written into an exported file.',
     tokenCreate: 'Create a token on GitHub',
 
     repo: 'Repository',
@@ -458,7 +458,7 @@ export const en: Dict = {
     connecting: 'Connecting…',
     connected: (full: string) => `Connected: ${full}`,
     connectedReadOnly: (full: string) =>
-      `Connected: ${full} — but the token has no write access, so this can only pull, never upload.`,
+      `Connected: ${full} — but this token has no write access, so it can only pull, never upload. For a fine-grained token, set Contents to Read and write (and regenerate the token; changing the permission alone does not take effect).`,
     needToken: 'Enter an access token first.',
     needRepo: (login: string) => `The token works (${login}) — now fill in the repository name.`,
     connectFirst: 'That repository has not been checked yet — press “Connect” first.',
@@ -505,7 +505,8 @@ export const en: Dict = {
 
     errUnconfigured: 'No repository is connected yet.',
     errAuth: 'The token is invalid or has expired.',
-    errForbidden: 'The token may not read and write this repository.',
+    errForbidden:
+      'The token does not have enough permission. For a fine-grained token, open the token on GitHub, set Repository permissions → Contents to Read and write, then regenerate the token (a permission change only takes effect on a new token). For a classic token, tick “repo”.',
     errRateLimit: 'GitHub’s rate limit is used up — try again in a little while.',
     errNotFound: 'No such repository. Check the name, and that the token can see it.',
     errBranchNotFound:

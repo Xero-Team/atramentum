@@ -12,7 +12,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useI18n } from '../i18n'
 import type { Lang } from '../i18n/detect'
 import { useSyncStore } from '../store/syncStore'
-import { SyncError, createRepo, getRepo, getUser } from './github'
+import { SyncError, canWrite, createRepo, getRepo, getUser } from './github'
 import { errorText, failureText } from './messages'
 import { forgetCloudState, refreshPending, restoreFromCloud, runSync } from './index'
 
@@ -92,10 +92,14 @@ export function SyncPanel() {
         return
       }
       const info = await getRepo(tk, login, name)
+      // `permissions.push` claims rights the Git Data API may still refuse, so ask
+      // the write endpoint itself — otherwise a read-only token looks connected
+      // and then fails at the first upload
+      const writable = await canWrite({ token: tk, owner: login, repo: name, branch: branch.trim() || info.defaultBranch })
       setConfig({ owner: login, repo: name, branch: branch.trim() || info.defaultBranch })
       setNotice({
-        ok: true,
-        text: info.canPush
+        ok: writable,
+        text: writable
           ? t.sync.connected(`${login}/${name}`)
           : t.sync.connectedReadOnly(`${login}/${name}`),
       })

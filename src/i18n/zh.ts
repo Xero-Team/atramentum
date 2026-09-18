@@ -449,7 +449,8 @@ export const zh = {
     connectTitle: '连接仓库',
     token: '访问令牌',
     tokenPlaceholder: 'github_pat_… 或 ghp_…',
-    tokenHint: '需要一个能读写该仓库的令牌（细粒度令牌给 Contents 读写权限即可）。令牌只存在这台设备上，不会上传，也不进导出文件。',
+    tokenHint:
+      '需要一个能读写该仓库的令牌。细粒度令牌：Repository access 选中该仓库，Permissions → Repository permissions → Contents 设为 Read and write（其余都不用给）。经典令牌：勾 repo 即可。令牌只存在这台设备上，不会上传，也不进导出文件。',
     tokenCreate: '去 GitHub 创建令牌',
 
     repo: '仓库名',
@@ -465,7 +466,7 @@ export const zh = {
     connecting: '连接中……',
     connected: (full: string) => `已连接：${full}`,
     connectedReadOnly: (full: string) =>
-      `已连接：${full}，但令牌没有写入权限，只能拉取不能上传。`,
+      `已连接：${full}，但这个令牌**没有写入权限**，只能拉取不能上传。细粒度令牌请把 Contents 改成 Read and write（改完要重新生成令牌）。`,
     needToken: '先填访问令牌。',
     needRepo: (login: string) => `令牌有效（${login}），再把仓库名填上。`,
     connectFirst: '上面填的仓库还没验证过，先点「连接」确认一下。',
@@ -507,7 +508,8 @@ export const zh = {
 
     errUnconfigured: '还没有连接仓库。',
     errAuth: '令牌无效或已过期。',
-    errForbidden: '令牌没有这个仓库的读写权限。',
+    errForbidden:
+      '令牌的权限不够。细粒度令牌请到 GitHub 该令牌的 Permissions 里，把 Repository permissions → Contents 改成 Read and write，然后重新生成令牌（改完权限要重新生成才会生效）。经典令牌勾上 repo 即可。',
     errRateLimit: 'GitHub 的接口调用次数用完了，过一会儿再试。',
     errNotFound: '找不到这个仓库。确认名字写对了，并且令牌有权访问它。',
     errBranchNotFound: '仓库在，但没有这个分支。把「分支」改成仓库实际用的那个（通常是 main 或 master）。',

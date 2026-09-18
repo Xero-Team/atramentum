@@ -51,7 +51,11 @@ export interface RepoRef {
 
 export interface RepoInfo {
   defaultBranch: string
-  /** Whether the token can push to it (false for a read-only token) */
+  /**
+   * What the repository payload claims about pushing. Advisory only: it can say
+   * true for a token whose Contents permission is read-only, so the UI asks the
+   * write endpoint itself (see `canWrite`) rather than trusting this.
+   */
   canPush: boolean
 }
 
@@ -147,6 +151,30 @@ export async function getRepo(token: string, owner: string, repo: string): Promi
     defaultBranch: r.default_branch ?? 'main',
     // Absent for tokens that cannot see it; only an explicit false means read-only
     canPush: r.permissions?.push !== false,
+  }
+}
+
+/**
+ * Can this token actually *write* to the repository?
+ *
+ * `permissions.push` in the repository payload only speaks about pushing to a
+ * branch, which is not the same question as whether the token carries the
+ * Contents *write* permission the Git Data API needs — a fine-grained token
+ * scoped to read gets `permissions.push: true` and then fails at the first
+ * blob. The one honest test is to make the API answer for a write endpoint, and
+ * the cheapest write that changes nothing is creating an empty tree over an
+ * empty base: it leaves no object behind that anyone will ever look at.
+ */
+export async function canWrite(ref: RepoRef): Promise<boolean> {
+  try {
+    await request(ref.token, `/repos/${ref.owner}/${ref.repo}/git/trees`, {
+      method: 'POST',
+      body: { tree: [] },
+    })
+    return true
+  } catch (e) {
+    if (e instanceof SyncError && (e.code === 'forbidden' || e.code === 'notFound')) return false
+    throw e
   }
 }
 
