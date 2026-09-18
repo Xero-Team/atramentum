@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { HashRouter, Navigate, Route, Routes } from 'react-router-dom'
 import Bookshelf from './components/Bookshelf'
 import Reader from './components/Reader'
@@ -5,9 +6,20 @@ import { NewCourseDialog } from './generate/NewCourseDialog'
 import { useGenerateStore } from './generate/generateStore'
 import { UpdatePrompt } from './pwa/UpdatePrompt'
 import { AppUpdatePrompt } from './native/AppUpdatePrompt'
+import { installSyncReminders, syncOnOpen } from './sync/reminders'
 
 export default function App() {
   const generateOpen = useGenerateStore((s) => s.open)
+
+  // Cloud sync: one run when the app opens (unless it is switched off), plus the
+  // leave and background behaviour. Here rather than on the shelf, so a deep link
+  // straight into a book still syncs.
+  useEffect(() => {
+    const uninstall = installSyncReminders()
+    void syncOnOpen()
+    return uninstall
+  }, [])
+
   return (
     <HashRouter>
       <Routes>

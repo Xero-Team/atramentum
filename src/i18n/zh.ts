@@ -21,6 +21,7 @@ export const zh = {
     save: '保存',
     confirm: '确定',
     close: '关闭',
+    back: '返回',
     remove: '删除',
     rename: '重命名',
     settings: '设置',
@@ -56,6 +57,12 @@ export const zh = {
     updateReload: '重载',
     updateLater: '稍后再说',
 
+    syncTitle: '云同步',
+    syncOff: '未连接。把课本与批注同步到自己的私有 GitHub 仓库，手机和电脑就能共用一份。',
+    syncOn: (repo: string, when: string) => `已连接到 ${repo}。${when}`,
+    syncPending: (n: number) => `有 ${n} 项改动尚未上传。`,
+    syncOpen: '云同步设置',
+
     provider: '服务商预设',
     providerCustom: '自定义端点',
     providerHint: '也可直接改下方请求地址接入任何 OpenAI 兼容端点。密钥仅存本机 localStorage，不会随导出文件流出。',
@@ -88,6 +95,14 @@ export const zh = {
     touchDragHint: '长按卡片可拖动归档（也可用卡片上的分类下拉）。',
     aiWrite: 'AI 著书',
     import: '导入',
+    /** The shelf-header sync button, shown once a repository is connected */
+    sync: '同步',
+    syncing: '同步中',
+    syncBadge: (n: number) => `${n} 项未上传`,
+    syncUpload: '上传',
+    syncDone: (pulled: number, pushed: number, conflicts: number) =>
+      `同步完成：拉取 ${pulled} 本、上传 ${pushed} 本${conflicts ? `、冲突 ${conflicts} 本` : ''}。`,
+    syncFailed: (msg: string) => `同步失败：${msg}。`,
     loadFailed: (msg: string) => `内容清单加载失败：${msg}`,
     dismissNotice: '关闭提示',
     loading: '书卷整理中……',
@@ -419,6 +434,77 @@ export const zh = {
     upToDate: '已是最新版本',
     version: (version: string, build: string) => `当前版本 ${version}（build ${build}）`,
     failed: (msg: string) => `更新失败：${msg}`,
+  },
+
+  /**
+   * Cloud sync: the shelf, the settings entry and the dialog. What travels is
+   * courses, highlights, Q&A and the category filing — the AI key and the rest
+   * of the settings never leave the device, which the copy says out loud
+   * wherever the user might worry about it.
+   */
+  sync: {
+    title: '云同步',
+    intro: '把课本、批注、问答与分类同步到一个私有 GitHub 仓库。AI 密钥等设置永远不会上传。',
+
+    connectTitle: '连接仓库',
+    token: '访问令牌',
+    tokenPlaceholder: 'github_pat_… 或 ghp_…',
+    tokenHint: '需要一个能读写该仓库的令牌（细粒度令牌给 Contents 读写权限即可）。令牌只存在这台设备上，不会上传，也不进导出文件。',
+    tokenCreate: '去 GitHub 创建令牌',
+
+    repo: '仓库名',
+    repoPlaceholder: 'moxue-sync',
+    repoHint: '填仓库名就行（不用带用户名）。没有的话可以在这里直接建一个私有的，或者先去 GitHub 新建再回来填。',
+    createRepo: '新建私有仓库',
+    creating: '创建中……',
+    createRepoFailed: '自动建仓库没成功（多半是令牌没有建仓权限）。到 GitHub 上手动建一个私有的，回来把名字填上就行。',
+    repoManual: '在 GitHub 上手动新建',
+
+    branch: '分支',
+    connect: '连接',
+    connecting: '连接中……',
+    connected: (login: string) => `已连接：${login}`,
+
+    syncNow: '立即同步',
+    syncing: '同步中……',
+    cancelWait: '同步进行中，稍等一下',
+    never: '还没有同步过',
+    lastSync: (when: string) => `上次同步：${when}`,
+    pending: (n: number) => `本机有 ${n} 项改动尚未上传`,
+    inSync: '本机与云端一致',
+    summary: (pulled: number, pushed: number, conflicts: number) =>
+      `拉取 ${pulled} 本 · 上传 ${pushed} 本${conflicts ? ` · 冲突 ${conflicts}` : ''}`,
+    conflicts: (n: number) =>
+      `${n} 本书两端都改过，已采用云端版本。本机的版本没有被丢掉，放在仓库的 moxue/conflicts/ 目录里。`,
+
+    deletedTitle: '本机删掉、云端还在的书',
+    deletedHint: '删除不会同步到别的设备，所以云端还留着它们。点「取回」可以把某本拉回来。',
+    restore: '取回',
+
+    forcePush: '强制上传全部',
+    forcePushHint: '把本机每一本书都重新上传一遍，并覆盖云端的同名书。只在确认云端内容不该保留时用。',
+    forceConfirm: '这会把本机的每一本书覆盖到云端同名书上，云端的改动会丢失。确定继续？',
+
+    autoOnOpen: '打开应用时自动同步',
+    leaveLabel: '离开时',
+    leaveRemind: '提醒我',
+    leaveAuto: '自动上传',
+    leaveOff: '不处理',
+    leaveHint: '关页面 / 切到后台时怎么办。选「提醒我」时，未上传的改动会在书架顶部一直显示。',
+
+    backupHint: '第一次同步之前，建议先用书架上的「导出 zip」备份一遍，多一层保险。',
+    disconnect: '断开连接',
+    disconnectConfirm: '断开后会清除本机的令牌与同步记录，云端仓库里的内容不动。重新连接会重新拉取一次。',
+
+    errUnconfigured: '还没有连接仓库。',
+    errAuth: '令牌无效或已过期。',
+    errForbidden: '令牌没有这个仓库的读写权限。',
+    errRateLimit: 'GitHub 的接口调用次数用完了，过一会儿再试。',
+    errNotFound: '找不到这个仓库。确认名字写对了，并且令牌有权访问它。',
+    errConflict: '有别的设备刚好也在同步，重试了几次都没抢过它，稍后再试。',
+    errNetwork: '连不上 GitHub，检查网络后重试。',
+    errServer: 'GitHub 那边出错了，稍后再试。',
+    errUnknown: '同步失败',
   },
 
   /**

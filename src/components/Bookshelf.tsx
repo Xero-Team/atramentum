@@ -18,6 +18,9 @@ import { InstallPrompt } from '../pwa/InstallPrompt'
 import { onCourseCreated, useGenerateStore } from '../generate/generateStore'
 import { GenerateBadge } from './GenerateBadge'
 import { useTouchDrag } from './common/useTouchDrag'
+import { isSyncConfigured, useSyncStore } from '../store/syncStore'
+import { runSync } from '../sync'
+import { failureText } from '../sync/messages'
 
 /** Marks a category block as a drop target for the touch drag (HTML5 DnD uses its own events) */
 const DROP_ATTR = 'data-drop-category'
@@ -261,6 +264,7 @@ export default function Bookshelf() {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [showSettings, setShowSettings] = useState(false)
+  const [settingsView, setSettingsView] = useState<'main' | 'sync'>('main')
   const [showImport, setShowImport] = useState(false)
   const openGenerate = useGenerateStore((s) => s.openGenerate)
 
@@ -277,11 +281,38 @@ export default function Bookshelf() {
   const [touch] = useState(isTouchDevice)
   const touchGhostRef = useRef<HTMLDivElement>(null)
 
+  const syncReady = useSyncStore(isSyncConfigured)
+  const syncPending = useSyncStore((s) => s.pending)
+  const [syncing, setSyncing] = useState(false)
+
   const refresh = useCallback(() => {
     listAllCourses()
       .then((list) => setCourses(list))
       .catch((e) => setError((e as Error).message))
   }, [])
+
+  /**
+   * One tap from the shelf. Pulled books change what is on it, so the list is
+   * re-read afterwards whichever way the run went.
+   */
+  const syncNow = useCallback(async () => {
+    if (!isSyncConfigured(useSyncStore.getState())) {
+      setSettingsView('sync')
+      setShowSettings(true)
+      return
+    }
+    setSyncing(true)
+    setNotice('')
+    try {
+      const summary = await runSync()
+      setNotice(t.shelf.syncDone(summary.pulled, summary.pushed, summary.conflicts))
+      refresh()
+    } catch (e) {
+      setNotice(t.shelf.syncFailed(failureText(t, e)))
+    } finally {
+      setSyncing(false)
+    }
+  }, [refresh, t])
 
   useEffect(() => {
     refresh()
@@ -289,6 +320,12 @@ export default function Bookshelf() {
 
   // A book finished (or was continued) in the background → refresh the shelf live
   useEffect(() => onCourseCreated(() => refresh()), [refresh])
+
+  // A sync that landed after this page mounted may have brought books with it
+  const syncStatus = useSyncStore((s) => s.status)
+  useEffect(() => {
+    if (syncStatus.kind === 'done') refresh()
+  }, [syncStatus, refresh])
 
   // A built-in course marked with a lang only belongs to that interface language,
   // so the guide swaps over when the language does. Everything else (imported,
@@ -400,6 +437,23 @@ export default function Bookshelf() {
             >
               {t.common.settings}
             </button>
+            {/* Only once a repository is connected: before that it would be a
+                button that does nothing but open its own settings */}
+            {syncReady && (
+              <button
+                className="relative border border-ink/20 px-3 py-2 text-xs tracking-widest text-ink-soft transition hover:border-cinnabar/50 hover:text-cinnabar-deep md:py-1.5"
+                onClick={() => void syncNow()}
+                disabled={syncing}
+              >
+                {syncing ? t.shelf.syncing : t.shelf.sync}
+                {syncPending > 0 && (
+                  <span
+                    className="absolute -right-1.5 -top-1.5 h-2.5 w-2.5 rounded-full bg-cinnabar"
+                    aria-label={t.shelf.syncBadge(syncPending)}
+                  />
+                )}
+              </button>
+            )}
             <ThemeToggle />
             <div className="ml-auto h-10 w-10 shrink-0 bg-cinnabar text-center font-song text-xl font-bold leading-10 text-paper shadow-seal sm:ml-0 sm:h-12 sm:w-12 sm:text-2xl sm:leading-[3rem]">
               {t.shelf.brandMark}
@@ -409,6 +463,22 @@ export default function Bookshelf() {
 
         {/* Install invitation lives on the shelf only — it has no business interrupting a reader */}
         <InstallPrompt />
+
+        {/* Changes made here that have not reached the cloud. This strip *is* the
+            "remind me before I leave" policy: a background tab cannot raise a
+            dialog, so the durable reminder is one that is simply always there. */}
+        {syncReady && syncPending > 0 && (
+          <p className="mt-4 flex flex-wrap items-center gap-3 border border-cinnabar/40 bg-cinnabar/5 px-4 py-2.5 text-sm text-cinnabar-deep">
+            <span className="min-w-0 flex-1">{t.shelf.syncBadge(syncPending)}</span>
+            <button
+              className="shrink-0 border border-cinnabar/40 px-3 py-1.5 text-xs transition hover:bg-cinnabar hover:text-paper disabled:opacity-50"
+              onClick={() => void syncNow()}
+              disabled={syncing}
+            >
+              {syncing ? t.shelf.syncing : t.shelf.syncUpload}
+            </button>
+          </p>
+        )}
 
         {error && (
           <p className="mt-10 border border-cinnabar/40 bg-cinnabar/5 px-4 py-3 text-sm text-cinnabar-deep">
@@ -528,7 +598,15 @@ export default function Bookshelf() {
         <footer className="mt-16 border-t border-ink/10 pt-6 text-xs text-ink-faint">{t.shelf.footer}</footer>
       </div>
 
-      {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} />}
+      {showSettings && (
+        <SettingsDialog
+          initialView={settingsView}
+          onClose={() => {
+            setShowSettings(false)
+            setSettingsView('main')
+          }}
+        />
+      )}
       {showImport && (
         <ImportDialog
           onClose={() => setShowImport(false)}

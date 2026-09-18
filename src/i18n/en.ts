@@ -17,6 +17,7 @@ export const en: Dict = {
     save: 'Save',
     confirm: 'OK',
     close: 'Close',
+    back: 'Back',
     remove: 'Delete',
     rename: 'Rename',
     settings: 'Settings',
@@ -58,6 +59,12 @@ export const en: Dict = {
     updateReload: 'Reload',
     updateLater: 'Later',
 
+    syncTitle: 'Cloud sync',
+    syncOff: 'Not connected. Sync your courses and highlights to a private GitHub repository of your own, and share one copy between phone and computer.',
+    syncOn: (repo: string, when: string) => `Connected to ${repo}. ${when}`,
+    syncPending: (n: number) => `${n} change(s) not uploaded yet.`,
+    syncOpen: 'Cloud sync settings',
+
     provider: 'Provider preset',
     providerCustom: 'Custom endpoint',
     providerHint:
@@ -91,6 +98,14 @@ export const en: Dict = {
     touchDragHint: 'Hold a card to drag it into a category — or use the category dropdown on the card.',
     aiWrite: 'Write with AI',
     import: 'Import',
+    /** The shelf-header sync button, shown once a repository is connected */
+    sync: 'Sync',
+    syncing: 'Syncing',
+    syncBadge: (n: number) => `${n} not uploaded`,
+    syncUpload: 'Upload',
+    syncDone: (pulled: number, pushed: number, conflicts: number) =>
+      `Sync finished: ${pulled} down, ${pushed} up${conflicts ? `, ${conflicts} in conflict` : ''}.`,
+    syncFailed: (msg: string) => `Sync failed: ${msg}.`,
     loadFailed: (msg: string) => `Could not load the library: ${msg}`,
     dismissNotice: 'Dismiss',
     loading: 'Gathering your books…',
@@ -415,6 +430,78 @@ export const en: Dict = {
     upToDate: 'Up to date',
     version: (version: string, build: string) => `Version ${version} (build ${build})`,
     failed: (msg: string) => `Update failed: ${msg}`,
+  },
+
+  sync: {
+    title: 'Cloud sync',
+    intro: 'Sync your courses, highlights, Q&A and category filing to a private GitHub repository. Your AI key and the rest of your settings never leave this device.',
+
+    connectTitle: 'Connect a repository',
+    token: 'Access token',
+    tokenPlaceholder: 'github_pat_… or ghp_…',
+    tokenHint:
+      'A token that can read and write that repository (a fine-grained token needs Contents read and write). It is stored on this device only — never uploaded, and never written into an exported file.',
+    tokenCreate: 'Create a token on GitHub',
+
+    repo: 'Repository',
+    repoPlaceholder: 'moxue-sync',
+    repoHint:
+      'Just the name — no username. Create a private one here, or make it on GitHub first and fill the name in when you come back.',
+    createRepo: 'Create a private repository',
+    creating: 'Creating…',
+    createRepoFailed:
+      'Creating it automatically did not work (usually the token may not create repositories). Make a private one on GitHub and fill the name in here.',
+    repoManual: 'Create it on GitHub',
+
+    branch: 'Branch',
+    connect: 'Connect',
+    connecting: 'Connecting…',
+    connected: (login: string) => `Connected as ${login}`,
+
+    syncNow: 'Sync now',
+    syncing: 'Syncing…',
+    cancelWait: 'A sync is already running — give it a moment',
+    never: 'Never synced',
+    lastSync: (when: string) => `Last synced ${when}`,
+    pending: (n: number) => `${n} change(s) here not uploaded yet`,
+    inSync: 'This device matches the cloud',
+    summary: (pulled: number, pushed: number, conflicts: number) =>
+      `${pulled} down · ${pushed} up${conflicts ? ` · ${conflicts} in conflict` : ''}`,
+    conflicts: (n: number) =>
+      `${n} book(s) had changed on both sides, so the cloud copy was taken. Yours was not thrown away — it is under moxue/conflicts/ in the repository.`,
+
+    deletedTitle: 'Deleted here, still in the cloud',
+    deletedHint:
+      'Deleting does not travel to your other devices, so the cloud still holds these. “Bring back” pulls one down again.',
+    restore: 'Bring back',
+
+    forcePush: 'Upload everything',
+    forcePushHint:
+      'Re-uploads every book on this device over the cloud copy of the same name. Only when you are sure the cloud version should not be kept.',
+    forceConfirm: 'This overwrites every cloud book with the one on this device, and the cloud changes are lost. Continue?',
+
+    autoOnOpen: 'Sync when the app opens',
+    leaveLabel: 'When leaving',
+    leaveRemind: 'Remind me',
+    leaveAuto: 'Upload',
+    leaveOff: 'Do nothing',
+    leaveHint:
+      'What happens when the page closes or the app goes to the background. On “Remind me”, anything not uploaded stays visible at the top of the shelf.',
+
+    backupHint: 'Before the first sync, it is worth taking a backup with “Export zip” from the shelf — one more safety net.',
+    disconnect: 'Disconnect',
+    disconnectConfirm:
+      'Disconnecting forgets the token and the sync state on this device. The repository is left alone; reconnecting pulls everything down again.',
+
+    errUnconfigured: 'No repository is connected yet.',
+    errAuth: 'The token is invalid or has expired.',
+    errForbidden: 'The token may not read and write this repository.',
+    errRateLimit: 'GitHub’s rate limit is used up — try again in a little while.',
+    errNotFound: 'No such repository. Check the name, and that the token can see it.',
+    errConflict: 'Another device was syncing at the same time and won every retry. Try again shortly.',
+    errNetwork: 'Could not reach GitHub. Check your connection and try again.',
+    errServer: 'GitHub returned an error. Try again later.',
+    errUnknown: 'Sync failed',
   },
 
   ask: {
