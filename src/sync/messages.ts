@@ -9,7 +9,9 @@ import { SyncError, type SyncErrorCode } from './github'
 
 /**
  * A failure the user can act on, rather than GitHub's own wording. GitHub's
- * message is only worth showing when ours would not explain the situation.
+ * message is only worth showing when ours would not explain the situation —
+ * and for a conflict it is the *only* thing that says which of several causes
+ * it was, so it is appended rather than dropped.
  */
 export function errorText(t: Dict, code: SyncErrorCode | 'unknown', detail: string): string {
   switch (code) {
@@ -26,7 +28,7 @@ export function errorText(t: Dict, code: SyncErrorCode | 'unknown', detail: stri
     case 'branchNotFound':
       return `${t.sync.errBranchNotFound}${detail ? `（${detail}）` : ''}`
     case 'conflict':
-      return t.sync.errConflict
+      return `${t.sync.errConflict}${detail ? `（GitHub：${detail}）` : ''}`
     case 'network':
       return t.sync.errNetwork
     case 'server':

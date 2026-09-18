@@ -156,6 +156,17 @@ function startFakeGitHub(port) {
       state.readOnlyToken = (await readBody(req)).on === true
       return json(res, 200, { readOnlyToken: state.readOnlyToken })
     }
+    /**
+     * A repository made on github.com rather than through the panel: the web UI
+     * initialises it, so `main` already exists by the time anything syncs into
+     * it. That is a different starting state from the panel's own button, and
+     * the one a user with a classic token ends up in.
+     */
+    if (path === '/__webRepo' && method === 'POST') {
+      const body = await readBody(req)
+      state.repos.set(`${OWNER}/${body.name}`, newRepo(true))
+      return json(res, 200, { created: `${OWNER}/${body.name}` })
+    }
 
     if (req.headers.authorization !== `Bearer ${TOKEN}`) {
       return json(res, 401, { message: 'Bad credentials' })
@@ -698,6 +709,39 @@ try {
   const coursePath = `moxue/courses/${course.id}.json`
   check('the book is in the repository', !!afterFirst[coursePath], Object.keys(afterFirst).sort().join(', '))
   check('the index and the filing are there too', !!afterFirst['moxue/manifest.json'], Object.keys(afterFirst).length + ' paths')
+
+  /* ── A repository made on github.com instead of by the panel ──
+     The web UI initialises a new repository, so `main` is already there when the
+     first sync arrives. Same feature, different starting state — and the one a
+     user who made the repository by hand lands in. */
+  await fetch(`http://127.0.0.1:${API_PORT}/__webRepo`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'made-on-the-web' }),
+  })
+  await setInput(a, `input[placeholder="moxue-sync"]`, 'made-on-the-web')
+  await clickButton(a, '连接')
+  await waitFor(() => evaluate(a, `/已连接|没有写入权限|同步失败/.test(document.body.innerText)`), {
+    label: 'the web-made repository connects',
+    tries: 40,
+  })
+  const webReady = await evaluate(a, `(() => { const m = document.body.innerText.match(/已连接[^\\n]*|同步失败[^\\n]*|没有写入权限[^\\n]*/); return m ? m[0] : '' })()`)
+  check('a repository that already has its branch connects cleanly', /已连接/.test(webReady), webReady)
+
+  await clickButton(a, '立即同步')
+  const webRun = await waitFor(
+    () => evaluate(a, `(() => { const m = document.body.innerText.match(/同步(完成|失败)[^\\n]*/); return m ? m[0] : '' })()`),
+    { label: 'the web-made repository syncs', tries: 80 },
+  )
+  check('and syncs into it without a 422', /同步完成/.test(webRun), webRun)
+  check('the books arrive in the web-made repository too', Object.keys(await github.tree()).filter((p) => p.startsWith('moxue/courses/')).length >= 1)
+
+  // Put the configuration back for the rest of the run
+  await setInput(a, `input[placeholder="moxue-sync"]`, REPO)
+  await clickButton(a, '连接')
+  await waitFor(() => evaluate(a, `/已连接|没有写入权限/.test(document.body.innerText)`), { label: 'reconnected', tries: 40 })
+  await clickButton(a, '立即同步')
+  await waitFor(() => evaluate(a, `/同步(完成|失败)/.test(document.body.innerText)`), { label: 'back on the main repo', tries: 80 })
 
   const courseBlob = JSON.parse((await github.blobs()).find((t) => t.includes(course.id) && t.startsWith('{"format":"moxue-course"')) ?? 'null')
   check(
