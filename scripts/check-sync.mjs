@@ -282,6 +282,12 @@ function startFakeGitHub(port) {
     }
     if (rest === '/git/trees' && method === 'POST') {
       const body = await readBody(req)
+      // A base-less *empty* tree on a repository with no commits is refused:
+      // there is nothing to base it on and nothing in it. A base-less tree that
+      // actually carries entries is the normal first commit, and is accepted.
+      if (body.base_tree === undefined && (body.tree ?? []).length === 0 && repo.commits.size === 0) {
+        return json(res, 409, { message: 'Git Repository is empty.' })
+      }
       const entries = new Map()
       for (const e of repo.trees.get(body.base_tree) ?? []) entries.set(e.path, e)
       for (const e of body.tree ?? []) {

@@ -162,8 +162,14 @@ export async function getRepo(token: string, owner: string, repo: string): Promi
  * Contents *write* permission the Git Data API needs — a fine-grained token
  * scoped to read gets `permissions.push: true` and then fails at the first
  * blob. The one honest test is to make the API answer for a write endpoint, and
- * the cheapest write that changes nothing is creating an empty tree over an
- * empty base: it leaves no object behind that anyone will ever look at.
+ * the cheapest write that changes nothing is creating an empty tree: it leaves
+ * no object behind that anyone will ever look at.
+ *
+ * An **empty** repository answers 409 to a base-less tree (there is no tree to
+ * base on yet), which is not a permissions problem at all — the very first
+ * sync into a newly created repository is exactly when this runs, so treating
+ * it as a failure made a brand-new repository unsyncable. A repository with no
+ * commits certainly accepts writes; there is simply nothing to write over.
  */
 export async function canWrite(ref: RepoRef): Promise<boolean> {
   try {
@@ -173,6 +179,7 @@ export async function canWrite(ref: RepoRef): Promise<boolean> {
     })
     return true
   } catch (e) {
+    if (e instanceof SyncError && e.code === 'conflict') return true // empty repository: nothing to base a tree on yet
     if (e instanceof SyncError && (e.code === 'forbidden' || e.code === 'notFound')) return false
     throw e
   }

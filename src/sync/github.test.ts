@@ -87,6 +87,15 @@ describe('requests', () => {
     await expect(canWrite(ref)).resolves.toBe(false)
   })
 
+  it('does not mistake an empty repository for a read-only token', async () => {
+    // A base-less tree on a repository with no commits is refused with 409. This
+    // probe runs at connect time, which is exactly when a newly created
+    // repository is empty — reading that as "cannot write" made a brand-new
+    // repository unsyncable, and the 409 then surfaced as a phantom race.
+    respond = () => ({ status: 409, json: { message: 'Git Repository is empty.' } })
+    await expect(canWrite(ref)).resolves.toBe(true)
+  })
+
   it('creates a private repository, leaving it empty on purpose', async () => {
     respond = () => ({ json: { name: 'r', owner: { login: 'me' }, default_branch: 'main' } })
     await expect(createRepo('tok', 'r', 'desc')).resolves.toEqual({ owner: 'me', repo: 'r', defaultBranch: 'main' })
