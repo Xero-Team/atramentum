@@ -456,7 +456,17 @@ export const en: Dict = {
     branch: 'Branch',
     connect: 'Connect',
     connecting: 'Connecting…',
-    connected: (login: string) => `Connected as ${login}`,
+    connected: (full: string) => `Connected: ${full}`,
+    connectedReadOnly: (full: string) =>
+      `Connected: ${full} — but the token has no write access, so this can only pull, never upload.`,
+    needToken: 'Enter an access token first.',
+    needRepo: (login: string) => `The token works (${login}) — now fill in the repository name.`,
+    connectFirst: 'That repository has not been checked yet — press “Connect” first.',
+
+    stateReady: (full: string, branch: string) =>
+      `Configured: ${full} (branch ${branch}). Changes take effect at once; there is nothing to save.`,
+    stateTokenOnly: 'A token is set, but the repository has not been checked — press “Connect” below.',
+    stateEmpty: 'Not configured yet. Enter a token and a repository name, then press “Connect”.',
 
     syncNow: 'Sync now',
     syncing: 'Syncing…',

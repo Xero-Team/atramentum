@@ -463,7 +463,16 @@ export const zh = {
     branch: '分支',
     connect: '连接',
     connecting: '连接中……',
-    connected: (login: string) => `已连接：${login}`,
+    connected: (full: string) => `已连接：${full}`,
+    connectedReadOnly: (full: string) =>
+      `已连接：${full}，但令牌没有写入权限，只能拉取不能上传。`,
+    needToken: '先填访问令牌。',
+    needRepo: (login: string) => `令牌有效（${login}），再把仓库名填上。`,
+    connectFirst: '上面填的仓库还没验证过，先点「连接」确认一下。',
+
+    stateReady: (full: string, branch: string) => `已配置：${full}（分支 ${branch}）。改动即时生效，不需要保存。`,
+    stateTokenOnly: '令牌已填，但仓库还没验证过 —— 点下面的「连接」确认。',
+    stateEmpty: '还没配置。填入令牌和仓库名，点「连接」即可开始。',
 
     syncNow: '立即同步',
     syncing: '同步中……',

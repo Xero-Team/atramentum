@@ -66,22 +66,39 @@ export function SyncPanel() {
     [repoDraft],
   )
 
+  /**
+   * Check the token and the repository and keep what works.
+   *
+   * The repository name is used as typed, falling back to whatever the token's
+   * account implies; a failure here keeps the token but leaves the repository
+   * unset, so the panel can say exactly which half is wrong rather than just
+   * "connect failed".
+   */
   const connect = async () => {
     const tk = token.trim()
-    if (!tk) return
+    if (!tk) {
+      setNotice({ ok: false, text: t.sync.needToken })
+      return
+    }
     setBusy('connect')
     setNotice(null)
     try {
       const login = await getUser(tk)
-      setConfig({ owner: login })
       const name = repoDraft.trim()
-      if (name) {
-        const info = await getRepo(tk, login, name)
-        setConfig({ owner: login, repo: name, branch: info.defaultBranch })
-        setNotice({ ok: true, text: t.sync.connected(login) })
-      } else {
-        setNotice({ ok: true, text: t.sync.connected(login) })
+      if (!name) {
+        // The token is good but there is nothing to point at yet
+        setConfig({ owner: login, repo: '' })
+        setNotice({ ok: true, text: t.sync.needRepo(login) })
+        return
       }
+      const info = await getRepo(tk, login, name)
+      setConfig({ owner: login, repo: name, branch: branch.trim() || info.defaultBranch })
+      setNotice({
+        ok: true,
+        text: info.canPush
+          ? t.sync.connected(`${login}/${name}`)
+          : t.sync.connectedReadOnly(`${login}/${name}`),
+      })
     } catch (e) {
       setNotice({ ok: false, text: failureText(t, e) })
     } finally {
@@ -113,7 +130,32 @@ export function SyncPanel() {
     }
   }
 
+  /**
+   * Run a sync.
+   *
+   * Deliberately not gated behind a `disabled` button: a button that looks
+   * clickable and does nothing is the worst possible answer, and that is exactly
+   * what "type a token and a repository name, then press sync without ever
+   * pressing connect" used to give. Every reason we cannot run is said out loud.
+   */
   const syncNow = async (forcePush = false) => {
+    const tk = token.trim()
+    const name = repoDraft.trim()
+    if (!tk) {
+      setNotice({ ok: false, text: t.sync.needToken })
+      return
+    }
+    if (!configured) {
+      // Not connected yet: check the token and the repository now, in place, and
+      // let that outcome stand — it explains far more than "connect first" would
+      // (a bad token, a repository that is not there, a repository with no write
+      // access). Only say "connect first" when the check actually succeeded.
+      await connect()
+      setNotice((prev) => (prev?.ok ? { ok: false, text: t.sync.connectFirst } : prev))
+      return
+    }
+    if (forcePush && !window.confirm(t.sync.forceConfirm)) return
+    if (name && name !== repo) setConfig({ repo: name })
     setBusy('sync')
     setNotice(null)
     try {
@@ -150,10 +192,26 @@ export function SyncPanel() {
   }
 
   const configured = !!token.trim() && !!owner && !!repo
+  const tokenOnly = !!token.trim() && !configured
 
   return (
     <div className="space-y-5 p-5">
       <p className="text-xs leading-6 text-ink-soft">{t.sync.intro}</p>
+
+      {/* What is configured right now. There is no save button anywhere in this
+          panel — every field writes straight into the store — so without this a
+          user has no way to tell whether their settings took. */}
+      <p
+        className={`border px-3 py-2 text-xs leading-5 ${
+          configured ? 'border-ink/15 bg-paper-deep/50 text-ink-soft' : 'border-cinnabar/40 bg-cinnabar/5 text-cinnabar-deep'
+        }`}
+      >
+        {configured
+          ? t.sync.stateReady(`${owner}/${repo}`, branch || 'main')
+          : tokenOnly
+            ? t.sync.stateTokenOnly
+            : t.sync.stateEmpty}
+      </p>
 
       <section>
         <h3 className="mb-2 text-sm font-semibold text-ink">{t.sync.connectTitle}</h3>
@@ -193,7 +251,11 @@ export function SyncPanel() {
             onChange={(e) => setRepoDraft(e.target.value.trim())}
             spellCheck={false}
           />
-          <button className={miniBtn} disabled={!token.trim() || !repoDraft.trim() || busy !== null} onClick={makeRepo}>
+          <button
+            className={miniBtn}
+            disabled={!token.trim() || !repoDraft.trim() || busy !== null}
+            onClick={makeRepo}
+          >
             {busy === 'create' ? t.sync.creating : t.sync.createRepo}
           </button>
           <a className={miniBtn} href={newRepoURL} target="_blank" rel="noreferrer noopener">
@@ -212,7 +274,7 @@ export function SyncPanel() {
               spellCheck={false}
             />
           </div>
-          <button className={miniBtn} disabled={!token.trim() || busy !== null} onClick={connect}>
+          <button className={miniBtn} disabled={busy !== null} onClick={connect}>
             {busy === 'connect' ? t.sync.connecting : t.sync.connect}
           </button>
         </div>
@@ -244,10 +306,10 @@ export function SyncPanel() {
         )}
 
         <div className="mt-3 flex flex-wrap gap-2">
-          <button className={primaryBtn} disabled={!configured || busy !== null} onClick={() => syncNow()}>
+          <button className={primaryBtn} disabled={busy !== null} onClick={() => syncNow()}>
             {busy === 'sync' ? t.sync.syncing : t.sync.syncNow}
           </button>
-          <button className={miniBtn} disabled={!configured || busy !== null} onClick={() => syncNow(true)}>
+          <button className={miniBtn} disabled={busy !== null} onClick={() => syncNow(true)}>
             {t.sync.forcePush}
           </button>
         </div>

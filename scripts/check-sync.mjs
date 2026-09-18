@@ -574,10 +574,43 @@ try {
   await sleep(400)
   await clickButton(a, '云同步设置')
   await sleep(400)
+
+  // The panel must say what is configured: there is no save button anywhere, so
+  // without this line a user cannot tell whether their settings took
+  check('the panel says it is not configured yet', await evaluate(a, `/还没配置/.test(document.body.innerText)`))
+
+  // Type a token and a repository name, then press sync *without* pressing connect.
+  // This used to do nothing at all: both sync buttons were `disabled` on an
+  // unconnected config, so the click was swallowed and no message appeared.
   await setInput(a, 'input[type=password]', TOKEN)
   await setInput(a, `input[placeholder="moxue-sync"]`, REPO)
+  check(
+    'the panel says a token is set but the repository is unchecked',
+    await evaluate(a, `/令牌已填/.test(document.body.innerText)`),
+  )
+  await clickButton(a, '立即同步')
+  // Any of the three: a sync ran, the config was rejected, or it told us to connect.
+  // The text has to be read in the same evaluate as the test — a later read races
+  // the panel replacing the notice with the summary.
+  const answered = await waitFor(
+    () =>
+      evaluate(
+        a,
+        `(() => {
+          const m = document.body.innerText.match(/同步(完成|失败)[^\\n]*|先点[^\\n]*|找不到这个仓库[^\\n]*/)
+          return m ? m[0] : ''
+        })()`,
+      ),
+    { label: 'pressing sync on an unconnected config says something', tries: 40 },
+  )
+  check('pressing sync before connecting is explained, not silently ignored', !!answered, answered)
+  // The repository does not exist yet at this point, so the check it ran in place
+  // has to say so rather than leaving the user guessing
+  check('and the answer names the real problem', /找不到这个仓库|先点/.test(answered), answered)
+  check('the repository really does not exist until it is created', !(await adminState(API_PORT)).repos.includes(`${OWNER}/${REPO}`))
+
   await clickButton(a, '新建私有仓库')
-  const connected = await waitFor(() => evaluate(a, `document.body.innerText.includes('已连接')`), {
+  const connected = await waitFor(() => evaluate(a, `/已连接|已配置/.test(document.body.innerText)`), {
     label: 'the repository is connected',
     tries: 30,
   }).catch(() => false)
