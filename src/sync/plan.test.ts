@@ -183,6 +183,45 @@ describe('notes', () => {
     const plan = planSync(input({ ...withNotes(1000, state(1000)), synced: { [notesPath('c1')]: SHA_A } }))
     expect(plan.notes).toEqual([])
   })
+
+  it('uploads notes the cloud has no copy of, however unchanged this device looks', () => {
+    // A repository that was recreated, a file deleted there by hand, a branch
+    // switched: the stamps still read "already up", so only a look at the remote
+    // tree can tell that the highlights and conversations never arrived there
+    const { remoteManifest, localCourses, courseSeen, localNoteStamps, noteState } = withNotes(1000, state(1000))
+    delete remoteManifest.notes['c1']
+    const plan = planSync(
+      input({
+        localCourses,
+        courseSeen,
+        localNoteStamps,
+        noteState,
+        remoteManifest,
+        remoteTree: { [coursePath('c1')]: SHA_A },
+        synced: { [coursePath('c1')]: SHA_A, [notesPath('c1')]: SHA_A },
+      }),
+    )
+    expect(plan.notes).toEqual([{ id: 'c1', pull: false }])
+  })
+
+  it('uploads again when the index lists notes whose file is gone', () => {
+    // The index entry alone is not a copy: a book whose notes file was deleted
+    // leaves one behind, and trusting it would leave the notes cloud-side dead
+    const { remoteManifest, localCourses, courseSeen, localNoteStamps, noteState } = withNotes(1000, state(1000))
+    const plan = planSync(
+      input({
+        localCourses,
+        courseSeen,
+        localNoteStamps,
+        noteState,
+        remoteManifest,
+        remoteTree: { [coursePath('c1')]: SHA_A },
+        synced: { [coursePath('c1')]: SHA_A, [notesPath('c1')]: SHA_A },
+      }),
+    )
+    // Nothing to download — the file is not there — so this is an upload
+    expect(plan.notes).toEqual([{ id: 'c1', pull: false }])
+  })
 })
 
 describe('categories', () => {

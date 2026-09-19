@@ -121,9 +121,19 @@ export function planSync(input: PlanInput): Plan {
   const noteIds = [...new Set([...Object.keys(manifest.notes), ...Object.keys(localNoteStamps)])].sort()
   for (const id of noteIds) {
     if (gone.has(id)) continue
-    const remoteNotes = manifest.notes[id]
-    const pull = !!remoteNotes && remoteTree[notesPath(id)] !== synced[notesPath(id)]
-    const localMoved = force || noteState[id] === undefined || (localNoteStamps[id] ?? 0) !== noteState[id].stamp
+    const remoteSha = remoteTree[notesPath(id)]
+    const pull = !!remoteSha && remoteSha !== synced[notesPath(id)]
+    // Nothing to download and nothing to build on: the cloud either has no notes
+    // file for this book or no index entry pointing at one. Whatever this device
+    // holds has to go up, however unchanged the stamps say it is — a repository
+    // that was recreated, a file deleted there by hand, a branch that was
+    // switched all leave the bookkeeping talking about a copy that is not there.
+    // The book decision re-checks the remote tree and recovers on its own; without
+    // the same check here, a library's highlights and conversations would simply
+    // never reach that repository again.
+    const absentUpThere = !remoteSha || !manifest.notes[id]
+    const localMoved =
+      force || absentUpThere || noteState[id] === undefined || (localNoteStamps[id] ?? 0) !== noteState[id].stamp
     if (pull || localMoved) notes.push({ id, pull })
   }
 
