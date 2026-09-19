@@ -130,7 +130,9 @@ function startFakeGitHub(port) {
 
     /* Test-only administration, outside the API the app talks to */
     if (path === '/__state') {
-      const repo = state.repos.get(`${OWNER}/${REPO}`)
+      // `?repo=owner/name` reads a repository other than the one the run is on,
+      // which is what the "connected somewhere else" cases have to look at
+      const repo = state.repos.get(url.searchParams.get('repo') ?? `${OWNER}/${REPO}`)
       const head = repo?.refs.get(BRANCH)
       // refs hold a commit sha; the tree is keyed by the tree sha that commit points at
       const treeSha = head ? repo.commits.get(head)?.tree : undefined
@@ -166,6 +168,28 @@ function startFakeGitHub(port) {
       const body = await readBody(req)
       state.repos.set(`${OWNER}/${body.name}`, newRepo(true))
       return json(res, 200, { created: `${OWNER}/${body.name}` })
+    }
+
+    /**
+     * Delete a path from the default branch, the way an edit on github.com does.
+     * What "the cloud no longer has this file" looks like to a device that last
+     * synced when it did — a repository recreated, a branch switched, a file
+     * removed by hand.
+     */
+    if (path === '/__drop' && method === 'POST') {
+      const { path: victim } = await readBody(req)
+      const repo = state.repos.get(`${OWNER}/${REPO}`)
+      const head = repo?.refs.get(BRANCH)
+      const treeSha = head ? repo.commits.get(head)?.tree : undefined
+      if (!treeSha) return json(res, 409, { message: 'nothing to drop it from' })
+      const entries = (repo.trees.get(treeSha) ?? []).filter((e) => e.path !== victim)
+      const tree = `tree-${++repo.counter}`
+      repo.trees.set(tree, entries)
+      const sha = `commit-${++repo.counter}`
+      repo.commits.set(sha, { tree, parents: [head] })
+      repo.refs.set(BRANCH, sha)
+      // state.commits is left alone: it counts what the *app* committed
+      return json(res, 200, { dropped: victim, paths: entries.length })
     }
 
     if (req.headers.authorization !== `Bearer ${TOKEN}`) {
@@ -330,15 +354,24 @@ function startFakeGitHub(port) {
         state,
         close: () => server.close(),
         /** Paths currently in the default branch, as git would report them */
-        tree: async () => (await adminState(port)).tree,
-        blobs: async () => (await adminState(port)).blobs,
+        tree: async (repo = `${OWNER}/${REPO}`) => (await adminState(port, repo)).tree,
+        blobs: async (repo = `${OWNER}/${REPO}`) => (await adminState(port, repo)).blobs,
         commits: async () => (await adminState(port)).commits,
       }),
     )
   })
 }
 
-const adminState = (port) => fetch(`http://127.0.0.1:${port}/__state`).then((r) => r.json())
+const adminState = (port, repo = `${OWNER}/${REPO}`) =>
+  fetch(`http://127.0.0.1:${port}/__state?repo=${encodeURIComponent(repo)}`).then((r) => r.json())
+
+/** Remove a path from the default branch, the way an edit on github.com would */
+const dropFromRepo = (path) =>
+  fetch(`http://127.0.0.1:${API_PORT}/__drop`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path }),
+  }).then((r) => r.json())
 
 /* ───────── CDP ───────── */
 
@@ -740,7 +773,13 @@ try {
     { label: 'the web-made repository syncs', tries: 80 },
   )
   check('and syncs into it without a 422', /同步完成/.test(webRun), webRun)
-  check('the books arrive in the web-made repository too', Object.keys(await github.tree()).filter((p) => p.startsWith('moxue/courses/')).length >= 1)
+  // Read *that* repository, not the one the rest of the run is on: the tree of
+  // the main repository has held books since the first sync, so asking it would
+  // pass this check whatever the second repository received
+  check(
+    'the books arrive in the web-made repository too',
+    Object.keys(await github.tree(`${OWNER}/made-on-the-web`)).filter((p) => p.startsWith('moxue/courses/')).length >= 1,
+  )
 
   // Put the configuration back for the rest of the run
   await setInput(a, `input[placeholder="moxue-sync"]`, REPO)
@@ -834,6 +873,130 @@ try {
     merged.length === 2,
     `${merged.length}: ${JSON.stringify(merged.map((n) => n.text))}`,
   )
+
+  /* ── Q&A history: the conversations ride along with the highlights ──
+     The half of the notes payload nothing else here can reach: a conversation
+     needs an AI endpoint and there is none, so the record is seeded straight
+     into the database — the same shape the panel writes once an answer lands,
+     protocol messages included, so the whitelist is exercised for real. */
+  const seedThread = (page, thread) =>
+    evaluate(
+      page,
+      `new Promise((resolve, reject) => {
+        const open = indexedDB.open('moxue')
+        open.onerror = () => reject(open.error)
+        open.onsuccess = () => {
+          const tx = open.result.transaction('threads', 'readwrite')
+          tx.objectStore('threads').put(${JSON.stringify(thread)})
+          tx.oncomplete = () => resolve(true)
+          tx.onerror = () => reject(tx.error)
+        }
+      })`,
+    )
+
+  const localThreads = (page, courseId) =>
+    evaluate(
+      page,
+      `new Promise((resolve, reject) => {
+        const open = indexedDB.open('moxue')
+        open.onerror = () => reject(open.error)
+        open.onsuccess = () => {
+          const tx = open.result.transaction('threads', 'readonly')
+          const all = tx.objectStore('threads').getAll()
+          all.onsuccess = () => resolve(all.result.filter(t => t.courseId === ${JSON.stringify(courseId)}))
+          all.onerror = () => reject(all.error)
+        }
+      })`,
+    )
+
+  /** The current moxue-notes blob for one book, as text (`blobs` is newest last, so a re-upload wins) */
+  const notesBlob = async (courseId) => {
+    const all = await github.blobs()
+    return all.filter((t) => t?.startsWith('{"format":"moxue-notes"') && t.includes(courseId)).pop() ?? null
+  }
+
+  const at = Date.now()
+  const asked = {
+    id: `${course.id}:t:${at}`,
+    courseId: course.id,
+    path: 'lesson01.md',
+    sectionTitle: '第一课',
+    selection: '这一行是用来划线做标注的',
+    before: '',
+    after: '',
+    nonce: at,
+    label: '这一行是用来划线做标注的',
+    turns: [
+      { role: 'user', content: '这句是什么意思？' },
+      { role: 'assistant', content: '意思是这一行是留给你划线的。' },
+    ],
+    // Protocol messages carry whole lessons as context: bulky, and only meaningful
+    // against the endpoint that produced them, so they must never reach the repo
+    apiMessages: [{ role: 'system', content: 'LESSON-CONTEXT-MUST-NOT-BE-UPLOADED' }],
+    createdAt: at,
+    updatedAt: at,
+  }
+  await seedThread(a, asked)
+
+  await syncFromUi(a)
+  const uploaded = await notesBlob(course.id)
+  check('a conversation is uploaded alongside the highlights', !!uploaded?.includes(asked.id), uploaded ? `${uploaded.length} bytes` : 'no notes blob at all')
+  check('and its turns travel in full', !!uploaded?.includes('意思是这一行是留给你划线的'))
+  check('while the agent protocol messages never leave the device', !!uploaded && !uploaded.includes('LESSON-CONTEXT-MUST-NOT-BE-UPLOADED'))
+
+  await syncFromUi(b)
+  const onB = (await localThreads(b, course.id)).find((t) => t.id === asked.id)
+  check('the conversation reaches the second device', onB?.turns?.length === 2, JSON.stringify(onB?.turns ?? null))
+
+  // Asking a follow-up over there must come back here — and the copy that comes
+  // back carries no protocol messages, so this device has to keep its own or
+  // syncing once would cost it the ability to carry the conversation on
+  await seedThread(b, {
+    ...onB,
+    turns: [...onB.turns, { role: 'user', content: '再展开讲讲。' }, { role: 'assistant', content: '好，再展开讲讲。' }],
+    updatedAt: onB.updatedAt + 1000,
+  })
+  await syncFromUi(b)
+  await syncFromUi(a)
+  const onA = (await localThreads(a, course.id)).find((t) => t.id === asked.id)
+  check('a follow-up asked on the other device comes back to this one', onA?.turns?.length === 4, `${onA?.turns?.length ?? 0} turns`)
+  check('and this device still holds its own protocol messages (so the conversation can be carried on)', Array.isArray(onA?.apiMessages) && onA.apiMessages.length > 0)
+
+  // Deleting a conversation travels, unlike deleting a book: the tombstone is in
+  // the notes file itself, so the other device does not keep the ghost around
+  await evaluate(
+    a,
+    `new Promise((resolve, reject) => {
+      const open = indexedDB.open('moxue')
+      open.onerror = () => reject(open.error)
+      open.onsuccess = () => {
+        const tx = open.result.transaction('threads', 'readwrite')
+        tx.objectStore('threads').delete(${JSON.stringify(asked.id)})
+        tx.oncomplete = () => resolve(true)
+        tx.onerror = () => reject(tx.error)
+      }
+    })`,
+  )
+  await syncFromUi(a)
+  await syncFromUi(b)
+  check(
+    'deleting a conversation on one device removes it on the other',
+    (await localThreads(b, course.id)).every((t) => t.id !== asked.id),
+    `${(await localThreads(b, course.id)).length} left on B`,
+  )
+
+  /* ── The notes file goes missing up there ──
+     A repository recreated under the same name, a branch switched, a file
+     deleted on github.com. The device's bookkeeping still says the notes are up,
+     and the books recover from that on their own because their decision reads
+     the remote tree. The notes have to as well — otherwise a library would
+     quietly stop carrying its highlights to that repository, which looks exactly
+     like "notes do not sync". */
+  const notesFile = `moxue/notes/${course.id}.json`
+  await dropFromRepo(notesFile)
+  check('the notes file really is gone from the repository', !(await github.tree())[notesFile])
+  const replaced = await syncFromUi(a)
+  check('a notes file the cloud has lost is uploaded again', !!(await github.tree())[notesFile], replaced)
 
   /* ── Both devices change the same book: the cloud wins, the loser is kept ── */
   // A rewrite of one lesson, the way the app itself would write it (plus a
