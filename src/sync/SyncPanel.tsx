@@ -166,7 +166,7 @@ export function SyncPanel() {
     setNotice(null)
     try {
       const summary = await runSync({ forcePush })
-      setNotice({ ok: true, text: t.shelf.syncDone(summary.pulled, summary.pushed, summary.conflicts) })
+      setNotice({ ok: true, text: t.shelf.syncDone(summary.pulled, summary.pushed, summary.conflicts, summary.noteItems) })
       setDeletedHere(summary.deletedHere)
     } catch (e) {
       setNotice({ ok: false, text: failureText(t, e) })
@@ -182,7 +182,7 @@ export function SyncPanel() {
       await restoreFromCloud(id)
       const summary = await runSync()
       setDeletedHere(summary.deletedHere)
-      setNotice({ ok: true, text: t.shelf.syncDone(summary.pulled, summary.pushed, summary.conflicts) })
+      setNotice({ ok: true, text: t.shelf.syncDone(summary.pulled, summary.pushed, summary.conflicts, summary.noteItems) })
     } catch (e) {
       setNotice({ ok: false, text: failureText(t, e) })
     } finally {
@@ -298,7 +298,7 @@ export function SyncPanel() {
         {status.kind === 'done' && (
           <>
             <p className="text-xs leading-6 text-ink-faint">
-              {t.sync.summary(status.summary.pulled, status.summary.pushed, status.summary.conflicts)}
+              {t.sync.summary(status.summary.pulled, status.summary.pushed, status.summary.conflicts, status.summary.noteItems)}
             </p>
             {status.summary.conflicts > 0 && (
               <p className="mt-1 text-xs leading-6 text-cinnabar-deep">{t.sync.conflicts(status.summary.conflicts)}</p>

@@ -305,7 +305,7 @@ export default function Bookshelf() {
     setNotice('')
     try {
       const summary = await runSync()
-      setNotice(t.shelf.syncDone(summary.pulled, summary.pushed, summary.conflicts))
+      setNotice(t.shelf.syncDone(summary.pulled, summary.pushed, summary.conflicts, summary.noteItems))
       refresh()
     } catch (e) {
       setNotice(t.shelf.syncFailed(failureText(t, e)))

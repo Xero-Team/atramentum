@@ -24,6 +24,13 @@ export interface SyncSummary {
   /** Books whose notes were reconciled */
   notes: number
   /**
+   * Highlights and conversations that actually moved, either way. The book counts
+   * above say nothing about them — a run that only carried notes reads as
+   * "0 up, 0 down" — so the summary line reports these too, or a user watching
+   * for their annotations has no way to tell that they went anywhere.
+   */
+  noteItems: number
+  /**
    * Books the cloud still holds after being deleted here. Deletions do not
    * travel, so these are simply the ones not being pulled; the dialog offers
    * them back rather than leaving them invisible.

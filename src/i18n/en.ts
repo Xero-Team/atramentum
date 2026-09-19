@@ -103,8 +103,8 @@ export const en: Dict = {
     syncing: 'Syncing',
     syncBadge: (n: number) => `${n} not uploaded`,
     syncUpload: 'Upload',
-    syncDone: (pulled: number, pushed: number, conflicts: number) =>
-      `Sync finished: ${pulled} down, ${pushed} up${conflicts ? `, ${conflicts} in conflict` : ''}.`,
+    syncDone: (pulled: number, pushed: number, conflicts: number, noteItems: number) =>
+      `Sync finished: ${pulled} down, ${pushed} up${conflicts ? `, ${conflicts} in conflict` : ''}${noteItems ? `, ${noteItems} highlight(s) and conversation(s)` : ''}.`,
     syncFailed: (msg: string) => `Sync failed: ${msg}.`,
     loadFailed: (msg: string) => `Could not load the library: ${msg}`,
     dismissNotice: 'Dismiss',
@@ -477,8 +477,8 @@ export const en: Dict = {
     lastSync: (when: string) => `Last synced ${when}`,
     pending: (n: number) => `${n} change(s) here not uploaded yet`,
     inSync: 'This device matches the cloud',
-    summary: (pulled: number, pushed: number, conflicts: number) =>
-      `${pulled} down · ${pushed} up${conflicts ? ` · ${conflicts} in conflict` : ''}`,
+    summary: (pulled: number, pushed: number, conflicts: number, noteItems: number) =>
+      `${pulled} down · ${pushed} up${conflicts ? ` · ${conflicts} in conflict` : ''}${noteItems ? ` · ${noteItems} highlight(s) and conversation(s)` : ''}`,
     conflicts: (n: number) =>
       `${n} book(s) had changed on both sides, so the cloud copy was taken. Yours was not thrown away — it is under moxue/conflicts/ in the repository.`,
 

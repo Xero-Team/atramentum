@@ -145,6 +145,7 @@ async function attemptOnce(ref: RepoRef, options: { forcePush?: boolean }): Prom
     pushed: 0,
     conflicts: 0,
     notes: 0,
+    noteItems: 0,
     deletedHere: plan.deletedHere.map((id) => ({ id, title: manifest.courses[id]?.title || id })),
   }
   const entries: { path: string; sha: string }[] = []
@@ -207,6 +208,7 @@ async function attemptOnce(ref: RepoRef, options: { forcePush?: boolean }): Prom
       await replaceNotes(action.id, merged.local.annotations, merged.local.threads)
     }
     if (merged.applyLocal || merged.pulled > 0 || merged.pushed > 0) summary.notes++
+    summary.noteItems += merged.pulled + merged.pushed
 
     const itemCount = merged.payload.annotations.length + merged.payload.threads.length
     nextNoteState[action.id] = {
@@ -409,7 +411,7 @@ function commitMessage(summary: SyncSummary, files: number): string {
   const parts: string[] = []
   if (summary.pushed) parts.push(`${summary.pushed} up`)
   if (summary.pulled) parts.push(`${summary.pulled} down`)
-  if (summary.notes) parts.push(`${summary.notes} notes`)
+  if (summary.notes) parts.push(`${summary.noteItems || summary.notes} notes`)
   if (summary.conflicts) parts.push(`${summary.conflicts} conflicts`)
   return `moxue: sync from ${useSyncStore.getState().deviceId} — ${parts.length ? parts.join(', ') : 'index'} (${files} files)`
 }

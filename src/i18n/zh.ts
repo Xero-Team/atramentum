@@ -100,8 +100,8 @@ export const zh = {
     syncing: '同步中',
     syncBadge: (n: number) => `${n} 项未上传`,
     syncUpload: '上传',
-    syncDone: (pulled: number, pushed: number, conflicts: number) =>
-      `同步完成：拉取 ${pulled} 本、上传 ${pushed} 本${conflicts ? `、冲突 ${conflicts} 本` : ''}。`,
+    syncDone: (pulled: number, pushed: number, conflicts: number, noteItems: number) =>
+      `同步完成：拉取 ${pulled} 本、上传 ${pushed} 本${conflicts ? `、冲突 ${conflicts} 本` : ''}${noteItems ? `、批注与问答 ${noteItems} 条` : ''}。`,
     syncFailed: (msg: string) => `同步失败：${msg}。`,
     loadFailed: (msg: string) => `内容清单加载失败：${msg}`,
     dismissNotice: '关闭提示',
@@ -484,8 +484,8 @@ export const zh = {
     lastSync: (when: string) => `上次同步：${when}`,
     pending: (n: number) => `本机有 ${n} 项改动尚未上传`,
     inSync: '本机与云端一致',
-    summary: (pulled: number, pushed: number, conflicts: number) =>
-      `拉取 ${pulled} 本 · 上传 ${pushed} 本${conflicts ? ` · 冲突 ${conflicts}` : ''}`,
+    summary: (pulled: number, pushed: number, conflicts: number, noteItems: number) =>
+      `拉取 ${pulled} 本 · 上传 ${pushed} 本${conflicts ? ` · 冲突 ${conflicts}` : ''}${noteItems ? ` · 批注与问答 ${noteItems} 条` : ''}`,
     conflicts: (n: number) =>
       `${n} 本书两端都改过，已采用云端版本。本机的版本没有被丢掉，放在仓库的 moxue/conflicts/ 目录里。`,
 
