@@ -111,14 +111,17 @@
   }
 }
 
-/* ── 划词标注（CSS Custom Highlight API：不动 DOM 上色） ──
+/* ── 划词标注（真元素上色，见 ask/marks.ts） ──
    与 ::selection 互不干扰：选区仍是朱红底白字，标注是淡朱底/朱红下划线。
-   颜色走变量：::highlight() 吃不到 Tailwind 的 dark: 变体，只能读 var()。 */
-::highlight(moxue-highlight) {
+   用 <mark> 而不是 CSS Custom Highlight API：有些 Android WebView 会暴露
+   CSS.highlights、照单收下范围、点击也能命中，却一个像素都不画 —— 那种失败
+   既检测不出来也不报错，只能靠真元素绕开。
+   UA 默认的 mark 是黄底黑字（Mark/MarkText），所以两个属性都得显式盖掉。 */
+mark.moxue-mark-highlight {
   background-color: rgb(var(--c-mark) / var(--c-mark-alpha));
   color: inherit;
 }
-::highlight(moxue-underline) {
+mark.moxue-mark-underline {
   background-color: transparent;
   color: inherit;
   text-decoration: underline 2px rgb(var(--c-mark-line));

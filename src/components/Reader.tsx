@@ -13,7 +13,7 @@ import { AskPanel } from '../ask/AskPanel'
 import type { AskSeed } from '../ask/AskPanel'
 import { AnnotationCard } from '../ask/AnnotationCard'
 import { AskHistory } from '../ask/AskHistory'
-import { annotationAtPoint, clearMarks, highlightsSupported, paintMarks, scrollToAnnotation } from '../ask/marks'
+import { annotationAtPoint, clearMarks, paintMarks, scrollToAnnotation } from '../ask/marks'
 import { anchorFromSelection, clearSelection } from '../ask/offsets'
 import { extractAskContext } from '../ask/context'
 import type { Annotation, AskThread } from '../ask/types'
@@ -521,10 +521,6 @@ export default function Reader() {
   useEffect(() => {
     const root = mountRef.current?.firstElementChild
     if (!(root instanceof HTMLElement) || content === null) return
-    if (annotations.length > 0 && !highlightsSupported()) {
-      // Older browsers (no CSS Custom Highlight API) degrade: the highlights are still stored and still viewable and editable in the history, just not painted
-      console.info('[moxue] this browser lacks the CSS Custom Highlight API; highlights will not be painted')
-    }
     paintMarks(root, annotations)
     const focus = pendingFocusRef.current
     if (focus && scrollToAnnotation(focus)) pendingFocusRef.current = null
