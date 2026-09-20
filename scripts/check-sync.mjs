@@ -442,6 +442,21 @@ async function evaluate(page, expression) {
   return r.result?.result?.value
 }
 
+/**
+ * Whether a computed background will show anything.
+ *
+ * Being in the DOM is not the same as being on screen: a highlight whose colour
+ * resolves to nothing is present, hit-testable, listed in the history — and
+ * invisible, which is the one thing the reader is looking at. So the assertions
+ * below read the computed colour rather than trusting the element to be enough.
+ */
+function paintsBackground(bg) {
+  const m = /^rgba?\(([^)]+)\)$/.exec(String(bg))
+  if (!m) return false
+  const parts = m[1].split(/[\s,/]+/).filter(Boolean)
+  return (parts.length >= 4 ? Number(parts[3]) : 1) > 0
+}
+
 /* ───────── Driving the app ───────── */
 
 const clickButton = (page, text) =>
@@ -593,20 +608,51 @@ const readCourseFile = (page, courseId, path) =>
     })`,
   )
 
+/** Open a course in the reader and wait for its prose to be on screen */
+async function openCourse(page, courseId) {
+  await page.send('Page.navigate', { url: `${APP}#/c/${courseId}` })
+  await waitFor(() => evaluate(page, `!!document.querySelector('.prose p')`), { label: `${page.label}: course open` })
+  await sleep(600)
+}
+
 /** Add a highlight, the way the reader does it: select text, then press "标" */
 async function addHighlight(page, courseId, text) {
-  await page.send('Page.navigate', { url: `${APP}#/c/${courseId}` })
-  await waitFor(() => evaluate(page, `!!document.querySelector('.prose p')`), { label: 'course open' })
-  await sleep(600)
+  await openCourse(page, courseId)
   const selected = await evaluate(
     page,
     `(() => {
-      const p = [...document.querySelectorAll('.prose p')].find(e => e.textContent.includes(${JSON.stringify(text)}))
-      if (!p || !p.firstChild) return false
-      const node = p.firstChild
-      const at = node.textContent.indexOf(${JSON.stringify(text)})
+      // Offsets into the container's plain text, which is the coordinate system the
+      // reader itself anchors by — a highlight already in the prose has split its
+      // paragraph into several text nodes, so "the first child of the paragraph it
+      // is in" is not a thing the selection may assume
+      const root = document.querySelector('.prose') ?? document.querySelector('.book-text')
+      if (!root) return false
+      const needle = ${JSON.stringify(text)}
+      const nodes = []
+      const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+        acceptNode: (n) =>
+          n.parentElement && !n.parentElement.closest('script, style, noscript, textarea') && n.data
+            ? NodeFilter.FILTER_ACCEPT
+            : NodeFilter.FILTER_REJECT,
+      })
+      for (let n = w.nextNode(); n; n = w.nextNode()) nodes.push(n)
+      const full = nodes.map((n) => n.data).join('')
+      const at = full.indexOf(needle)
+      if (at < 0) return false
+      let acc = 0
+      let from = null
+      let to = null
+      for (const n of nodes) {
+        const next = acc + n.data.length
+        if (!from && at < next) from = { node: n, offset: at - acc }
+        if (!to && at + needle.length <= next) to = { node: n, offset: at + needle.length - acc }
+        if (from && to) break
+        acc = next
+      }
+      if (!from || !to) return false
       const r = document.createRange()
-      r.setStart(node, at); r.setEnd(node, at + ${JSON.stringify(text)}.length)
+      r.setStart(from.node, from.offset)
+      r.setEnd(to.node, to.offset)
       const s = window.getSelection(); s.removeAllRanges(); s.addRange(r)
       document.dispatchEvent(new Event('selectionchange'))
       return true
@@ -857,10 +903,73 @@ try {
   const aNotes = await localNotes(a, course.id)
   check('the mark is stored on device A', aNotes.length === 1, JSON.stringify(aNotes.map((n) => n.note)))
 
+  // Stored is not the same as drawn. A device whose engine takes the ranges and
+  // then paints nothing leaves the annotation in the database, in the history and
+  // in the tap target, and shows nothing at all — which its owner can only read as
+  // "my highlights did not sync". So the mark itself is asserted here, and so is
+  // the tap that has to land on it.
+  const painted = await evaluate(
+    a,
+    `(() => {
+      const m = [...document.querySelectorAll('mark.moxue-mark-highlight')]
+      return { count: m.length, text: m[0]?.textContent ?? '', bg: m[0] ? getComputedStyle(m[0]).backgroundColor : '' }
+    })()`,
+  )
+  check(
+    'the mark is painted into the prose, not merely stored',
+    painted.count === 1 && painted.text === '这一行是用来划线做标注的' && paintsBackground(painted.bg),
+    JSON.stringify(painted),
+  )
+
+  // Hit-testing reads the painted marks, so close the card (a click that lands on
+  // no mark clears it) and then reopen it by clicking the mark alone
+  await evaluate(
+    a,
+    `(() => {
+      document.querySelector('.prose p').dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: -1, clientY: -1 }))
+      return true
+    })()`,
+  )
+  await sleep(300)
+  const cardClosed = await evaluate(a, `!document.querySelector('[role=dialog]')`)
+  const tappedMark = await evaluate(
+    a,
+    `(() => {
+      const m = document.querySelector('mark.moxue-mark-highlight')
+      if (!m) return false
+      const r = m.getBoundingClientRect()
+      m.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 }))
+      return true
+    })()`,
+  )
+  await sleep(400)
+  const cardReopened = await evaluate(a, `!!document.querySelector('[role=dialog]')`)
+  check(
+    'a tap on the painted mark reopens its card',
+    cardClosed && tappedMark && cardReopened,
+    `closed=${cardClosed} tapped=${tappedMark} reopened=${cardReopened}`,
+  )
+
   await syncFromUi(a)
   await syncFromUi(b)
   const bNotes = await localNotes(b, course.id)
   check('the highlight reaches the second device', bNotes.length === 1, `${bNotes.length} highlights`)
+
+  // …and shows up there. This is the whole point of syncing a highlight, and the
+  // half the stored-count assertion above cannot see.
+  await openCourse(b, course.id)
+  const paintedOnB = await evaluate(
+    b,
+    `(() => {
+      const m = [...document.querySelectorAll('mark.moxue-mark-highlight')]
+      return { count: m.length, text: m[0]?.textContent ?? '', bg: m[0] ? getComputedStyle(m[0]).backgroundColor : '' }
+    })()`,
+  )
+  check(
+    'and it is painted on the second device, not just stored',
+    paintedOnB.count === 1 && paintedOnB.text === '这一行是用来划线做标注的' && paintsBackground(paintedOnB.bg),
+    JSON.stringify(paintedOnB),
+  )
 
   // Now the case a whole-file last-write-wins would lose: a second mark, added
   // on the other device, must not replace the first
